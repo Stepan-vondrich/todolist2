@@ -1,0 +1,84 @@
+.manifest-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.manifest-modal {
+  background: #fff;
+  border-radius: 10px;
+  width: min(720px, 92vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+.manifest-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.manifest-title { font-weight: 600; }
+.manifest-title code { font-size: 0.82rem; color: #6b7280; }
+.manifest-close {
+  border: none; background: none; font-size: 1.1rem; cursor: pointer; color: #6b7280;
+}
+.manifest-banner {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.manifest-banner-btn {
+  margin-left: auto;
+  border: 1px solid #d97706;
+  background: #fff;
+  color: #b45309;
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.manifest-textarea {
+  flex: 1;
+  min-height: 360px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  tab-size: 3;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 12px;
+  resize: vertical;
+  white-space: pre;
+  overflow: auto;
+}
+.manifest-loading { color: #6b7280; padding: 40px; text-align: center; }
+.manifest-error {
+  margin-top: 10px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+.manifest-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.manifest-hint { color: #9ca3af; font-size: 0.78rem; margin-right: auto; }

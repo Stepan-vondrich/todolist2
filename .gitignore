@@ -1,0 +1,38 @@
+# Build outputs
+**/bin/
+**/obj/
+publish/
+backend/TodoApi/wwwroot/
+
+# Backup files
+*.backup
+
+# .NET
+*.user
+*.suo
+.vs/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# SQLite database (runtime file — never commit)
+*.db
+*.db-shm
+*.db-wal
+
+# Uploaded attachments (runtime files — never commit)
+uploads/
+backend/TodoApi/uploads/
+
+# Environment / secrets
+.env
+.env.local
+appsettings.*.json
+!appsettings.json
+
+
+# OS
+.DS_Store
+Thumbs.db

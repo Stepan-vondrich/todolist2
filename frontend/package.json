@@ -1,0 +1,38 @@
+{
+  "name": "todo-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "heic2any": "^0.0.4",
+    "magic-string": "^0.30.21",
+    "mammoth": "^1.12.0",
+    "pdfjs-dist": "^5.7.284",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.4",
+    "symbol-tree": "^3.2.4"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.1",
+    "@vitest/ui": "^1.6.0",
+    "@vitest/utils": "^1.6.0",
+    "estree-walker": "^3.0.3",
+    "happy-dom": "^20.9.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.1",
+    "vitest": "^1.6.0"
+  }
+}

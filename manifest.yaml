@@ -1,0 +1,14 @@
+nastaveni:
+   horizont_planovani: 3m
+   pracovni_doba:
+      po-pa: 09:00-17:00
+   okna_dne:
+      rano: 06:00-11:00
+      dopo: 11:00-14:00
+      odpo: 14:00-18:00
+      vecer: 18:00-23:00
+   reakce_lidi:
+      rychle: 1d
+      normalne: 3d
+      pomalu: 7d
+tasky: []
