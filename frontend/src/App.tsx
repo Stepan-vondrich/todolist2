@@ -63,6 +63,10 @@ function parseBookmarkArrays(b: FilterBookmark) {
   }
 }
 
+// Plánovač ("GPS pro tasky") je skrytý, ale funkční: route /now a ManifestPanel
+// zůstávají v kódu a fungují. Přepni na true pro zobrazení tlačítek 🧭 Teď / 📄 Manifest.
+const SHOW_PLANNER = false
+
 export default function App() {
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -547,8 +551,12 @@ export default function App() {
               <line x1="13" y1="13" x2="18" y2="18" />
             </svg>
           </button>
-          <Link className="backup-btn now-link" to="/now">🧭 Teď</Link>
-          <button className="backup-btn" onClick={() => setManifestOpen(true)}>📄 Manifest</button>
+          {SHOW_PLANNER && (
+            <>
+              <Link className="backup-btn now-link" to="/now">🧭 Teď</Link>
+              <button className="backup-btn" onClick={() => setManifestOpen(true)}>📄 Manifest</button>
+            </>
+          )}
           <button className="backup-btn" onClick={openExport}>↓ Export</button>
           <button className="backup-btn" onClick={openImport}>↑ Import</button>
           <button className="backup-btn" onClick={handleExportTime}>↓ Časování</button>

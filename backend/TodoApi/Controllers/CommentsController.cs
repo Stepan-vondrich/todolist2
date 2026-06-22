@@ -10,7 +10,7 @@ public record UpdateCommentRequest(string? Text);
 
 [ApiController]
 [Route("api/[controller]")]
-public class CommentsController(AppDbContext db, IWebHostEnvironment env) : ControllerBase
+public class CommentsController(AppDbContext db) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetByTodo([FromQuery] int todoId) =>
@@ -44,7 +44,7 @@ public class CommentsController(AppDbContext db, IWebHostEnvironment env) : Cont
         if (string.IsNullOrWhiteSpace(text) && fileEntries.Count == 0)
             return BadRequest("Text or file is required.");
 
-        var uploadsDir = Path.Combine(env.ContentRootPath, "uploads");
+        var uploadsDir = TodoApi.DataPaths.Uploads;
         Directory.CreateDirectory(uploadsDir);
 
         var comment = new Comment
@@ -133,7 +133,7 @@ public class CommentsController(AppDbContext db, IWebHostEnvironment env) : Cont
             .FirstOrDefaultAsync(c => c.Id == id);
         if (comment is null) return NotFound();
 
-        var uploadsRoot = Path.Combine(env.ContentRootPath, "uploads");
+        var uploadsRoot = TodoApi.DataPaths.Uploads;
         foreach (var att in comment.Attachments)
         {
             foreach (var path in new[] { att.Path, att.Preview })

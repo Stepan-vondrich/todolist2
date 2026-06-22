@@ -11,7 +11,7 @@ namespace TodoApi.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ExportController(AppDbContext db, IWebHostEnvironment env) : ControllerBase
+public class ExportController(AppDbContext db) : ControllerBase
 {
     public record PasswordDto(string Password, bool IncludeFiles = true);
 
@@ -52,7 +52,7 @@ public class ExportController(AppDbContext db, IWebHostEnvironment env) : Contro
 
             if (req.IncludeFiles)
             {
-                var uploadsDir = Path.Combine(env.ContentRootPath, "uploads");
+                var uploadsDir = TodoApi.DataPaths.Uploads;
                 if (Directory.Exists(uploadsDir))
                 {
                     foreach (var filePath in Directory.GetFiles(uploadsDir))
@@ -98,7 +98,7 @@ public class ExportController(AppDbContext db, IWebHostEnvironment env) : Contro
             using var reader = new StreamReader(dataEntry.Open());
             data = JsonSerializer.Deserialize<ExportData>(await reader.ReadToEndAsync(), JsonOpts)!;
 
-            var uploadsDir = Path.Combine(env.ContentRootPath, "uploads");
+            var uploadsDir = TodoApi.DataPaths.Uploads;
             Directory.CreateDirectory(uploadsDir);
             foreach (var entry in zip.Entries.Where(e => e.FullName.StartsWith("files/") && e.Name.Length > 0))
             {

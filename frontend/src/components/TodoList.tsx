@@ -82,6 +82,43 @@ export default function TodoList({ todos, onUpdate, onDelete, onAdd, onOpenComme
     setDropTarget(null)
   }
 
+  // Touch/pen drag reorder via Pointer Events. The native HTML5 drag-and-drop
+  // used above only fires for a mouse, so iOS/Android can't reorder with it.
+  // For touch we track the pointer ourselves: find the row under the finger,
+  // reuse the same before/after/inside zones, and reorder on release.
+  function startTouchDrag(sourceId: number, e: React.PointerEvent) {
+    if (!onReorder || e.pointerType === 'mouse') return // mouse keeps HTML5 DnD
+    e.preventDefault()
+    setDraggingId(sourceId)
+    let current: { id: number; position: DropPosition } | null = null
+
+    const onMove = (ev: PointerEvent) => {
+      ev.preventDefault() // stop the page from scrolling while dragging
+      const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null
+      const row = el?.closest('[data-todo-id]') as HTMLElement | null
+      if (!row) { current = null; setDropTarget(null); return }
+      const targetId = Number(row.getAttribute('data-todo-id'))
+      if (!targetId || targetId === sourceId) { current = null; setDropTarget(null); return }
+      const rect = row.getBoundingClientRect()
+      const y = ev.clientY - rect.top
+      const position: DropPosition = y < rect.height * 0.30 ? 'before' : y > rect.height * 0.70 ? 'after' : 'inside'
+      current = { id: targetId, position }
+      setDropTarget(prev => prev?.id === targetId && prev.position === position ? prev : { id: targetId, position })
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      const drop = current
+      setDraggingId(null)
+      setDropTarget(null)
+      if (drop && drop.id !== sourceId) onReorder?.(sourceId, drop.id, drop.position)
+    }
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+
   // Strip diacritics + lowercase for accent-insensitive matching ("krem" matches "krém")
   function normalizeText(s: string): string {
     return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
@@ -288,6 +325,7 @@ export default function TodoList({ todos, onUpdate, onDelete, onAdd, onOpenComme
           onDragEnd={endDrag}
           onDragOverRow={e => handleRowDragOver(e, todo.id)}
           onDropRow={e => handleRowDrop(e, todo.id)}
+          onHandlePointerDown={e => startTouchDrag(todo.id, e)}
         />
         {!isCollapsed && children.map(child => renderTodo(child, depth + 1, children))}
         {!isCollapsed && pendingSubtaskFor === todo.id && (

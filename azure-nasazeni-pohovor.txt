@@ -1,0 +1,337 @@
+================================================================================
+  NASAZENÍ APLIKACE TODOLIST2 DO AZURE CONTAINER APPS
+  Podklad pro pohovor – krok za krokem, s vysvětlením
+================================================================================
+
+Aplikace: fullstack TODO list
+  - Frontend: React + TypeScript (build nástrojem Vite)
+  - Backend:  C# ASP.NET Core Web API (.NET 8)
+  - Data:     původně SQLite, ve finále Azure SQL (vysvětleno níže)
+
+Cíl: vzít hotovou aplikaci, zabalit ji do Docker image, nahrát do registru
+     a rozběhnout v Azure Container Apps na adrese
+     https://app-containerapp-01.salmondune-4d937f62.northeurope.azurecontainerapps.io
+
+Klíčová myšlenka architektury:
+  Backend (.NET) servíruje jak API (/api/...), tak i samotný frontend
+  (statické soubory z adresáře wwwroot). Takže nepotřebuju dva kontejnery
+  ani dva weby – stačí JEDEN kontejner, který poslouchá na jednom portu
+  a obsluhuje úplně všechno. To zjednodušuje nasazení.
+
+
+================================================================================
+  ČÁST A – PŮVODNÍ ZADÁNÍ (4 kroky)
+================================================================================
+
+  1) Vytvořit Dockerfile pro frontend i backend
+  2) Buildnout image
+  3) Nahrát image do registru (ideálně Azure Container Registry – ACR)
+  4) V Container App vyměnit demo image za moji image
+
+Později přibyl 5. úkol: vyřešit PERZISTENCI DAT (aby data přežila restart).
+
+
+================================================================================
+  KROK 1 – DOCKERFILE (multi-stage build)
+================================================================================
+
+Dockerfile je "recept", podle kterého se postaví image (zabalená aplikace).
+Použil jsem tzv. MULTI-STAGE build = více fází v jednom souboru. Důvod: ve
+výsledné image nechci mít Node.js ani .NET SDK (kompilátory) – ty potřebuju
+jen během buildu. Ve finále chci jen běhové prostředí + zkompilovanou appku.
+Tím je výsledná image menší a bezpečnější.
+
+Tři fáze:
+
+  FÁZE 1 (node:20-alpine) – postaví frontend
+    - zkopíruje package.json + package-lock.json
+    - "npm ci" = nainstaluje přesně zamčené verze závislostí
+    - zkopíruje zdrojáky frontendu
+    - "npm run build" = Vite vyrobí statické soubory do složky dist/
+      (HTML, JS, CSS – hotový web)
+
+  FÁZE 2 (dotnet/sdk:8.0) – zkompiluje backend
+    - "dotnet restore" = stáhne NuGet balíčky
+    - "dotnet publish -c Release" = zkompiluje backend do /app/publish
+
+  FÁZE 3 (dotnet/aspnet:8.0) – běhový obraz (runtime), to co se reálně spustí
+    - zkopíruje zkompilovaný backend z FÁZE 2
+    - zkopíruje hotový frontend (dist/) z FÁZE 1 do složky wwwroot
+    - nastaví, na čem má appka poslouchat, a spustí ji
+
+Důležitá nastavení v běhové fázi:
+    ENV ASPNETCORE_URLS=http://+:8080   -> poslouchá na VŠECH síťových
+                                            rozhraních (0.0.0.0), port 8080
+    EXPOSE 8080
+    ENTRYPOINT ["dotnet", "TodoApi.dll"]
+
+  (ZMĚNA OPROTI PŮVODNÍMU NÁVRHU č.1: Lokálně appka běžela na "localhost"
+   a portu 6001. V kontejneru ale "localhost" znamená jen vnitřek kontejneru –
+   zvenku by se na ni nikdo nedostal. Proto bind na "http://+:8080"
+   = naslouchej na všech adresách. Číslo 8080 je běžná konvence pro
+   kontejnery a Azure Container Apps.)
+
+  (ZMĚNA č.2: Projekt měl v .csproj nastaveno OutputType=WinExe – tj. build
+   pro Windows GUI .exe. To je pro Linux kontejner nesmysl. Vyřešil jsem to
+   tím, že kontejner spouštím přes "dotnet TodoApi.dll" (ne přes .exe),
+   takže Windows-specifické nastavení nevadí.)
+
+  (ZMĚNA č.3 – úprava kódu Program.cs: Aplikace se po startu pokoušela
+   automaticky OTEVŘÍT PROHLÍŽEČ (Process.Start). To dává smysl u desktop
+   .exe na Windows, ale v Linux kontejneru žádný prohlížeč není a appka by
+   spadla. Obalil jsem to podmínkou "jen na Windows" (OperatingSystem.
+   IsWindows()) + try/catch.)
+
+Vytvořil jsem také .dockerignore (obdoba .gitignore) – říká, co se NEMÁ
+posílat do buildu: node_modules, bin, obj, databáze, uploads, .git…
+Tím je build rychlejší a image čistší.
+
+
+================================================================================
+  KROK 2 – BUILD IMAGE PŘES DOCKER DESKTOP  (na tohle se ptali konkrétně)
+================================================================================
+
+Co je Docker Desktop:
+  Aplikace na Windows, která v pozadí provozuje Docker engine (démona).
+  Na Windows běží přes WSL2  "Linux engine" – tzn. i když sedím na Windows,
+  kontejnery se staví a běží jako LINUX kontejnery (což je přesně to, co
+  Azure Container Apps chce – linux/amd64).
+
+Jak build probíhal:
+  1) Nastartoval jsem Docker Desktop (musí běžet démon, jinak "docker"
+     příkazy hlásí, že se nemůžou připojit k engine).
+  2) Spustil jsem build z kořene projektu:
+
+        docker build -t todolist2:latest G:\projects\todolist2
+
+     - "docker build"     = postav image podle Dockerfile
+     - "-t todolist2:latest" = pojmenuj image (tag) "todolist2", verze "latest"
+     - "G:\projects\todolist2" = build context = složka, ze které se berou
+                               soubory (a kde leží Dockerfile)
+
+  3) Co se dělo uvnitř (BuildKit – moderní buildovací engine Dockeru):
+     - Docker poslal build context (soubory bez toho, co je v .dockerignore)
+       do enginu.
+     - Postupně provedl všechny tři fáze z Dockerfile.
+     - Každý příkaz v Dockerfile = jedna "vrstva" (layer). Vrstvy se kešují,
+       takže při dalším buildu, když se zdrojáky nezměnily, použije cache
+       a je to bleskové.
+     - Multi-stage znamená, že FÁZE 1 a 2 (s kompilátory) se na konci ZAHODÍ
+       a do finální image se z nich jen zkopírují výsledky.
+  4) Výsledek: image "todolist2:latest", velikost cca 388 MB
+     (běhové .NET prostředí + zkompilovaná appka + frontend).
+  5) Ověření: "docker images" ukáže hotovou image v lokálním úložišti.
+
+  (ZMĚNA / KOMPLIKACE č.4 – velmi důležité pro pohovor:
+   PŮVODNĚ jsem chtěl image vůbec nestavět lokálně, ale nechat ji postavit
+   přímo v cloudu příkazem "az acr build" (build běží na serverech Azure).
+   To je elegantní, protože se obejde lokální prostředí. JENŽE Azure to
+   odmítlo s chybou "TasksOperationsNotAllowed" – tato (nová/free)
+   subscription nemá povolené ACR Tasks (cloudové buildy).
+   ŘEŠENÍ: postavil jsem image LOKÁLNĚ přes Docker Desktop a pak ji ručně
+   nahrál do registru. Proto se Docker Desktop vůbec dostal ke slovu.)
+
+  (KOMPLIKACE č.5 – AVG antivirus: První lokální build SELHAL na "dotnet
+   restore" (nešlo stáhnout balíčky z nuget.org). Příčina: AVG dělá tzv.
+   TLS interception – odposlouchává HTTPS a podepisuje ho vlastním
+   certifikátem, kterému Linux kontejner nedůvěřuje. Po dočasném vypnutí
+   "HTTPS scanning" v AVG build proběhl. Stejný AVG problém blokoval i
+   přihlášení do Azure – viz krok 4.)
+
+
+================================================================================
+  KROK 3 – NAHRÁNÍ IMAGE DO REGISTRU (Azure Container Registry – ACR)
+================================================================================
+
+Registr = soukromé úložiště Docker images v cloudu (jako "GitHub pro images").
+Container App si odtud image stáhne a spustí.
+
+  1) Vytvořil jsem ACR:
+        az acr create --name acrtodolist783a4e6d --sku Basic --admin-enabled true
+     - SKU Basic = nejlevnější varianta
+     - admin-enabled = zapne uživatelské jméno+heslo, kterým se Container App
+       k registru přihlásí (jednodušší než spravovaná identita)
+
+  2) Přihlásil jsem Docker do registru:
+        az acr login --name acrtodolist783a4e6d
+
+  3) "Otagoval" jsem lokální image plným jménem registru (aby Docker věděl,
+     kam ji má poslat):
+        docker tag todolist2:latest acrtodolist783a4e6d.azurecr.io/todolist2:latest
+
+  4) Nahrál (push):
+        docker push acrtodolist783a4e6d.azurecr.io/todolist2:latest
+     Docker nahraje jednotlivé vrstvy; ty, co už v registru jsou, přeskočí.
+
+  (KOMPLIKACE č.6 – musel jsem nejdřív zaregistrovat "resource provider"
+   Microsoft.ContainerRegistry. Nová subscription nemá automaticky povolené
+   všechny služby – musí se jednorázově "zaregistrovat" příkazem
+   "az provider register". Stejné jsem pak dělal i pro Microsoft.Storage
+   a Microsoft.Sql.)
+
+
+================================================================================
+  KROK 4 – VÝMĚNA DEMO IMAGE V CONTAINER APP
+================================================================================
+
+Container App "app-containerapp-01" původně běžel na demo image
+"containerapps-helloworld". Vyměnil jsem ji za moji.
+
+Než to šlo, musel jsem se přihlásit do Azure CLI ("az login"):
+
+  (KOMPLIKACE č.7 – přihlášení dalo zabrat:
+   a) AVG opět rozbíjel TLS (popsáno výše) – řešení: vypnout HTTPS scanning.
+   b) Klasické "az login" přes okno Windows (WAM broker) se rušilo s chybou
+      "User Cancelled" + zablokovaný PIN. Přepnul jsem na DEVICE CODE login:
+      "az login --use-device-code" -> vypíše kód, ten zadáš na
+      microsoft.com/devicelogin a přihlásíš se heslem. Spolehlivější.
+   c) ZMĚNA: účet stepanvondrich@gmail.com NEMĚL žádnou subscription –
+      Azure resources jsou pod účtem vondrich.stepan@seznam.cz. Přihlásil
+      jsem se tedy tím správným účtem.)
+
+Samotná výměna (tři příkazy):
+  1) Nastavit registr + přihlašovací údaje na Container App:
+        az containerapp registry set ... (server, username, password)
+  2) Vyměnit image:
+        az containerapp update --image acrtodolist783a4e6d.azurecr.io/todolist2:latest
+  3) Změnit příchozí port (ingress):
+        az containerapp ingress update --target-port 8080
+
+  (ZMĚNA č.8: Demo image poslouchala na portu 80, moje appka na 8080.
+   Proto jsem musel přenastavit "targetPort" ingressu z 80 na 8080,
+   jinak by Container App posílal provoz na špatný port.)
+
+Ověření: nová revize "app-containerapp-01--0000001" naběhla jako
+Running/Healthy; GET / vrátil 200 + HTML s <title>Todo List</title>;
+GET /api/todos vrátil [] (prázdný seznam). Funguje.
+
+  POZNÁMKA – pojem REVIZE: Container Apps verzují nasazení pomocí "revizí".
+  Každá změna (nová image, nová env proměnná, jiný port…) vyrobí novou revizi
+  (0000001, 0000002…). Provoz jde na nejnovější zdravou revizi; když nová
+  spadne, stará dál obsluhuje – takže appka nikdy "nezhasne".
+
+
+================================================================================
+  KROK 5 – PERZISTENCE DAT (přidaný úkol)  – nejzajímavější část
+================================================================================
+
+Problém: kontejner má jen DOČASNÉ úložiště. Když se restartuje nebo nasadí
+nová revize, jeho disk se vynuluje. Takže SQLite databáze (todos.db) i
+nahrané přílohy by se ZTRATILY. To je pro reálné použití nepřijatelné.
+
+První nápad (a proč NEVYŠEL):
+  Připojit do kontejneru perzistentní disk Azure Files (síťové úložiště)
+  a dát na něj SQLite databázi i uploads.
+  - Připravil jsem to: storage účet sttodolist783a4e6d, file share "tododata",
+    namountoval na cestu /data, nasměroval tam appku přes proměnnou DATA_DIR.
+  - JENŽE revize SPADLA. V logu: "SQLite Error 5: database is locked".
+
+  VYSVĚTLENÍ (důležité pro pohovor):
+  SQLite ke své práci potřebuje zamykání souborů (file locking). Azure Files
+  přes protokol SMB tohle zamykání plně nepodporuje. SQLite proto zatuhne a
+  spadne. Je to známé omezení – SQLite se na síťové sdílené disky nehodí.
+  (Container Apps navíc neumí mount option "nobrl", který to jinde obchází.)
+
+  (ZMĚNA č.9 – ZÁSADNÍ ROZHODNUTÍ: Místo "SQLite na síťovém disku" jsem
+   databázi přesunul do plnohodnotné databázové služby AZURE SQL. Soubory
+   příloh (uploads) ALE na Azure Files nechat můžou – obyčejné soubory
+   zamykání nepotřebují, takže ty přes SMB fungují bez problému.
+   Výsledek: rozdělené úložiště = DB v Azure SQL, soubory na Azure Files.)
+
+Co jsem pro to udělal:
+
+  A) ÚPRAVA KÓDU – appka teď umí dva druhy databáze:
+     - Lokálně (na mém PC / .exe): zůstává SQLite (jednoduché, bez serveru).
+     - V kontejneru: Azure SQL.
+     Volba se dělá automaticky podle toho, jestli je nastavená proměnná
+     AZURE_SQL_CONNECTION:
+        když je nastavená  -> použij Azure SQL (UseSqlServer)
+        když není          -> použij SQLite
+     (Centralizoval jsem také cesty k datům do nové třídy DataPaths.cs.)
+
+     (ZMĚNA č.10: Schéma databáze. U SQLite appka používala "migrace"
+      (EF Core Migrate). Pro Azure SQL jsem zvolil EnsureCreated() –
+      vytvoří tabulky rovnou podle aktuálního modelu, bez nutnosti udržovat
+      druhou sadu migrací pro jiný typ databáze. Méně práce, čistší.)
+
+  B) AZURE SQL – založení databáze:
+     - free serverless varianta (zdarma; "serverless" = uspí se při
+       nečinnosti a probudí se při dotazu, platí se jen za běh).
+     - connection string jsem uložil jako TAJNÝ KÓD (secret) v Container App
+       a do appky ho předal jako proměnnou AZURE_SQL_CONNECTION.
+       (Heslo se tak nikde neukazuje v plain textu.)
+     - firewall: povolit "Azure services", aby se Container App k DB dostal.
+
+     (KOMPLIKACE č.11: North Europe ANI West Europe zrovna NEPOVOLOVALY
+      vytvoření nového SQL serveru (chyba RegionDoesNotAllowProvisioning –
+      kapacitní/omezení regionu). Proto databáze nakonec běží ve SWEDEN
+      CENTRAL. Adresa serveru je nezávislá na regionu, takže to nevadí;
+      latence je zanedbatelná.)
+
+  C) PŘÍLOHY – zůstávají na Azure Files:
+     - file share "tododata" namountovaný na /data,
+     - proměnná DATA_DIR=/data -> appka ukládá přílohy do /data/uploads,
+     - to je perzistentní (přežije restart).
+
+Finální stav (revize 0000004):
+  - Databáze:  Azure SQL  (server sqltodo783a4e6d-swedencentral, db tododb)
+  - Přílohy:   Azure Files (share tododata -> /data/uploads)
+  - Tajný kód: azure-sql-connection (connection string)
+
+OVĚŘENÍ PERZISTENCE (klíčový test):
+  1) Přes API jsem vytvořil testovací TODO.
+  2) RESTARTOVAL jsem repliku kontejneru.
+  3) Po restartu tam TODO pořád bylo.
+  => Důkaz, že data jsou bezpečně v Azure SQL, ne na dočasném disku.
+  (Testovací záznam jsem pak uklidil, DB je prázdná.)
+
+
+================================================================================
+  KAM SE UKLÁDAJÍ PŘÍLOHY KOMENTÁŘŮ (rychlá odpověď)
+================================================================================
+
+  - Samotné soubory: Azure Files share "tododata", složka "uploads"
+                     (v kontejneru cesta /data/uploads).
+                     V portálu: Účet úložiště sttodolist783a4e6d ->
+                     Sdílené složky souborů -> tododata -> uploads.
+  - Metadata (cesta, typ, náhled): v Azure SQL, tabulka CommentAttachments.
+  - Lokálně: složka "uploads" vedle .exe + SQLite todos.db.
+
+
+================================================================================
+  SHRNUTÍ ZMĚN OPROTI PŮVODNÍMU NÁVRHU (rychlý přehled pro pohovor)
+================================================================================
+
+  1. localhost:6001  ->  http://+:8080   (kontejner musí poslouchat navenek)
+  2. WinExe .exe     ->  spouštění přes "dotnet TodoApi.dll" (Linux)
+  3. Auto-otevření prohlížeče omezeno jen na Windows (jinak pád v kontejneru)
+  4. Cloudový build (az acr build) NEšel -> build LOKÁLNĚ přes Docker Desktop
+  5. AVG TLS interception blokoval build i login -> dočasně vypnout HTTPS scan
+  6. Nutná registrace resource providerů (Registry, Storage, Sql)
+  7. az login: WAM okno selhalo -> device-code; špatný účet (gmail) -> seznam
+  8. Ingress port 80 -> 8080
+  9. SQLite na Azure Files SPADNE (locking) -> přesun DB do Azure SQL
+ 10. EF migrace (SQLite) -> EnsureCreated (Azure SQL)
+ 11. SQL server nešel v NE/WE -> založen ve Sweden Central
+
+
+================================================================================
+  POJMY, KTERÉ SE MŮŽOU HODIT (slovníček)
+================================================================================
+
+  Docker image      = zabalená aplikace + vše potřebné k běhu (read-only šablona)
+  Kontejner         = spuštěná instance image
+  Dockerfile        = recept, jak image postavit
+  Multi-stage build = build ve více fázích; finální image bez kompilátorů
+  BuildKit          = moderní buildovací engine Dockeru (cache vrstev)
+  Registr (ACR)     = cloudové úložiště images
+  Container App     = služba Azure pro běh kontejnerů (bez správy serverů)
+  Revize            = verze nasazení Container App
+  Ingress           = příchozí HTTP vstup + na jaký port přeposílat (targetPort)
+  Volume / mount    = připojení perzistentního úložiště do kontejneru (/data)
+  Azure Files (SMB) = síťové souborové úložiště (vhodné pro soubory, ne pro SQLite)
+  Azure SQL         = spravovaná SQL databáze (serverless = uspí se při nečinnosti)
+  Secret            = tajná hodnota (heslo, connection string) uložená v appce
+  Resource provider = služba Azure, kterou je třeba v subscription zaregistrovat
+  TLS interception  = antivirus/proxy odposlouchává HTTPS vlastním certifikátem
+================================================================================

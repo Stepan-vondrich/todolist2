@@ -882,6 +882,39 @@ h1 {
 .todo-header > span:nth-child(9) { width: 110px; flex-shrink: 0; }
 .todo-header > span:nth-child(10) { width: 90px; flex-shrink: 0; }
 
+/* Narrow screens (phones/tablets): the table has many fixed-width columns and
+   would otherwise squeeze the flexible "Název" column down to nothing, hiding the
+   text. Instead, anchor the table to a fixed minimum width and let it scroll
+   horizontally — columns stay aligned and every cell's text stays visible. */
+@media (max-width: 1000px) {
+  .todo-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .todo-header,
+  .todo-item {
+    min-width: 960px;
+  }
+  /* Add form: stack the title on its own row and let the date/status/button
+     wrap to a second row, so the form fits a phone instead of overflowing. */
+  .add-form {
+    flex-wrap: wrap;
+  }
+  .add-input {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  /* Let the header action buttons wrap instead of overflowing the screen. */
+  .app-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .backup-btns {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
 .header-cell {
   display: flex;
   flex-direction: column;
@@ -1055,10 +1088,22 @@ h1 {
   opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   padding: 4px 2px;
+  touch-action: none; /* let Pointer Events drive the touch drag instead of scrolling */
 }
 .todo-item:hover .drag-handle { opacity: 1; }
 .drag-handle:hover { color: #6366f1; }
 .drag-handle:active { cursor: grabbing; }
+
+/* Touch devices have no hover, so the drag handle would stay invisible.
+   Show it permanently and enlarge the tap target there. */
+@media (hover: none) {
+  .drag-handle {
+    opacity: 1;
+    color: #9ca3af;
+    padding: 10px 8px;
+    font-size: 16px;
+  }
+}
 
 .todo-item.is-dragging { opacity: 0.45; }
 
@@ -1324,6 +1369,17 @@ h1 {
   display: flex;
   flex-direction: column;
   z-index: 200;
+}
+
+/* On phones/tablets the 33vw side panel is too narrow and 100vh hides the
+   compose box + Send button behind the mobile browser's bottom toolbar.
+   Make it a full-screen panel using the dynamic viewport height (dvh) so the
+   Send button stays reachable. */
+@media (max-width: 1000px) {
+  .comments-panel {
+    width: 100vw;
+    height: 100dvh;
+  }
 }
 
 .comments-panel-header {

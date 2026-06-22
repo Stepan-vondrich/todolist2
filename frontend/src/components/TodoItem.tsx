@@ -31,6 +31,8 @@ interface Props {
   onDragEnd?: () => void
   onDragOverRow?: (e: React.DragEvent) => void
   onDropRow?: (e: React.DragEvent) => void
+  // Touch/pen drag start (Pointer Events) — native HTML5 DnD is mouse-only.
+  onHandlePointerDown?: (e: React.PointerEvent) => void
 }
 
 const STATUS_BG: Record<string, string> = {
@@ -113,7 +115,7 @@ function InlineCell({ value, placeholder, onSave, center }: {
   )
 }
 
-export default function TodoItem({ todo, onUpdate, onDelete, onSubtaskCreate, onOpenComments, onMove, onMoveUp, onMoveDown, commentCount = 0, childStatusCounts, depth = 0, hasChildren, isCollapsed, onToggleCollapse, isActive = false, onToggleActive, draggable = false, isDragging = false, dropPosition = null, onDragStart, onDragEnd, onDragOverRow, onDropRow }: Props) {
+export default function TodoItem({ todo, onUpdate, onDelete, onSubtaskCreate, onOpenComments, onMove, onMoveUp, onMoveDown, commentCount = 0, childStatusCounts, depth = 0, hasChildren, isCollapsed, onToggleCollapse, isActive = false, onToggleActive, draggable = false, isDragging = false, dropPosition = null, onDragStart, onDragEnd, onDragOverRow, onDropRow, onHandlePointerDown }: Props) {
   // Only the drag handle initiates a drag; rows aren't draggable by default so
   // text selection and double-click-to-edit keep working everywhere else.
   const [handleHeld, setHandleHeld] = useState(false)
@@ -186,6 +188,7 @@ export default function TodoItem({ todo, onUpdate, onDelete, onSubtaskCreate, on
           title="Přetáhnout pro přesun"
           onMouseDown={() => setHandleHeld(true)}
           onMouseUp={() => setHandleHeld(false)}
+          onPointerDown={onHandlePointerDown}
         >
           ⠿
         </span>

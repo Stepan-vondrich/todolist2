@@ -1,0 +1,17 @@
+# Build context hygiene — keep the image small and builds reproducible
+**/node_modules
+**/bin
+**/obj
+**/dist
+publish/
+*.backup
+todos.db
+todos.db-shm
+todos.db-wal
+uploads/
+backend/TodoApi/wwwroot
+.git
+.gitignore
+**/.vs
+**/*.user
+README.md
