@@ -1,6 +1,6 @@
 ================================================================================
   NASAZENÍ APLIKACE TODOLIST2 DO AZURE CONTAINER APPS
-  Podklad pro pohovor – krok za krokem, s vysvětlením
+  Dokumentace nasazení – krok za krokem, s vysvětlením
 ================================================================================
 
 Aplikace: fullstack TODO list
@@ -122,7 +122,7 @@ Jak build probíhal:
      (běhové .NET prostředí + zkompilovaná appka + frontend).
   5) Ověření: "docker images" ukáže hotovou image v lokálním úložišti.
 
-  (ZMĚNA / KOMPLIKACE č.4 – velmi důležité pro pohovor:
+  (ZMĚNA / KOMPLIKACE č.4 – velmi důležitá:
    PŮVODNĚ jsem chtěl image vůbec nestavět lokálně, ale nechat ji postavit
    přímo v cloudu příkazem "az acr build" (build běží na serverech Azure).
    To je elegantní, protože se obejde lokální prostředí. JENŽE Azure to
@@ -226,7 +226,7 @@ První nápad (a proč NEVYŠEL):
     namountoval na cestu /data, nasměroval tam appku přes proměnnou DATA_DIR.
   - JENŽE revize SPADLA. V logu: "SQLite Error 5: database is locked".
 
-  VYSVĚTLENÍ (důležité pro pohovor):
+  VYSVĚTLENÍ (důležité):
   SQLite ke své práci potřebuje zamykání souborů (file locking). Azure Files
   přes protokol SMB tohle zamykání plně nepodporuje. SQLite proto zatuhne a
   spadne. Je to známé omezení – SQLite se na síťové sdílené disky nehodí.
@@ -299,7 +299,7 @@ OVĚŘENÍ PERZISTENCE (klíčový test):
 
 
 ================================================================================
-  SHRNUTÍ ZMĚN OPROTI PŮVODNÍMU NÁVRHU (rychlý přehled pro pohovor)
+  SHRNUTÍ ZMĚN OPROTI PŮVODNÍMU NÁVRHU (rychlý přehled)
 ================================================================================
 
   1. localhost:6001  ->  http://+:8080   (kontejner musí poslouchat navenek)
@@ -388,7 +388,7 @@ gh repo create todolist2 --public --source=. --remote=origin --push
 
 # (BEZPEČNOST) odstranění citlivé hodnoty (subscription ID) i z HISTORIE commitů:
 git filter-branch --force --tree-filter \
-  'sed -i "s/<staré-subscription-id>/<SUBSCRIPTION_ID>/g" azure-nasazeni-pohovor.txt' -- --all
+  'sed -i "s/<staré-subscription-id>/<SUBSCRIPTION_ID>/g" azure-nasazeni.txt' -- --all
 git for-each-ref --format="%(refname)" refs/original/ | xargs -n1 git update-ref -d   # smazat zálohy
 git reflog expire --expire=now --all && git gc --prune=now                           # pročistit
 git push --force origin master                                                        # přepsat historii i na GitHubu
