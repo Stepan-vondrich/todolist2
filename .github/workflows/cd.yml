@@ -1,0 +1,41 @@
+name: CD - build & deploy to Azure
+
+on:
+  push:
+    branches: [ master ]      # spustí se na každý push do master
+  workflow_dispatch: {}        # + ruční spuštění tlačítkem na GitHubu
+
+env:
+  ACR: acrtodolist783a4e6d.azurecr.io
+  IMAGE: todolist2
+  RG: rg-containerapp-test-01
+  APP: app-containerapp-01
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: ACR login
+        run: az acr login --name acrtodolist783a4e6d
+      - name: Build & push image
+        run: |
+          docker build -t "$ACR/$IMAGE:${{ github.sha }}" -t "$ACR/$IMAGE:latest" .
+          docker push "$ACR/$IMAGE:${{ github.sha }}"
+          docker push "$ACR/$IMAGE:latest"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production      # APPROVAL GATE – čeká na tvé odkliknutí na GitHubu
+    steps:
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Ensure containerapp extension
+        run: az extension add --name containerapp --only-show-errors
+      - name: Deploy new revision to Container Apps
+        run: az containerapp update -n "$APP" -g "$RG" --image "$ACR/$IMAGE:${{ github.sha }}"
