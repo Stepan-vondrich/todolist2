@@ -371,15 +371,30 @@ az provider show --namespace Microsoft.ContainerRegistry --query registrationSta
 --------------------------------------------------------------------------------
 1) GIT REPOSITORY   (GitHub / Azure Repos)
 --------------------------------------------------------------------------------
-[RUČNĚ] Reálně: jen LOKÁLNÍ git, BEZ remote (commit zůstal na disku).
+[OK – NASAZENO] Lokální git + veřejné GitHub repo:
+https://github.com/Stepan-vondrich/todolist2 (public)
+
+# lokální commit
 git add -A
 git commit -m "Containerize + deploy to Azure Container Apps with persistence"
 
-[N/A] Napojení na GitHub (co by se dodělalo):
-git remote add origin https://github.com/<user>/todolist2.git
-git push -u origin master
+# GitHub CLI – instalace + přihlášení (gh funguje i se zapnutým AVG):
+winget install -e --id GitHub.cli --source winget --accept-source-agreements --accept-package-agreements
+gh auth login --web --hostname github.com --git-protocol https   # device-code: kód zadáš na github.com/login/device
 
-[N/A] Nebo Azure Repos:
+# vytvoření public repa + remote "origin" + push jedním příkazem:
+gh repo create todolist2 --public --source=. --remote=origin --push
+# další změny pak stačí:  git push
+
+# (BEZPEČNOST) odstranění citlivé hodnoty (subscription ID) i z HISTORIE commitů:
+git filter-branch --force --tree-filter \
+  'sed -i "s/<staré-subscription-id>/<SUBSCRIPTION_ID>/g" azure-nasazeni-pohovor.txt' -- --all
+git for-each-ref --format="%(refname)" refs/original/ | xargs -n1 git update-ref -d   # smazat zálohy
+git reflog expire --expire=now --all && git gc --prune=now                           # pročistit
+git push --force origin master                                                        # přepsat historii i na GitHubu
+# POZN.: HEAD scrub nestačí – stará hodnota zůstává v historii, dokud se nepřepíše.
+
+[N/A] Alternativa Azure Repos (nepoužito):
 az repos create --name todolist2 --project <project> --organization https://dev.azure.com/<org>
 git remote add origin https://dev.azure.com/<org>/<project>/_git/todolist2
 git push -u origin master
@@ -618,11 +633,15 @@ az containerapp env storage set -n env-containerapp-ne-01 -g rg-containerapp-tes
 # volume + mount na /data se nastaví v YAML (bod 6)
 
 ================================================================================
-  SHRNUTÍ: CO BYLO RUČNĚ vs. CO BY DĚLALA PIPELINE
+  SHRNUTÍ: STAV NASAZENÍ (ruční start -> plná CI/CD)
 ================================================================================
-Ručně (tento běh):    git commit (lokálně), npm/dotnet/docker build, az acr create,
-                      docker push, az containerapp update/ingress/yaml, az sql + storage.
-Pipeline by přidala:  git remote + push, CI (build+test na každém pushi), CD
-                      (build -> push -> deploy automaticky), oddělené dev/prod
-                      prostředí a manual approval gate před prod deployem.
+RUČNĚ jednou (počáteční infra): npm/dotnet/docker build, az acr create, docker push,
+            az containerapp create/update/ingress/yaml, az sql + storage, service principal.
+AUTOMATIZOVÁNO (hotovo):  GitHub repo + push; CD pipeline (cd.yml) na každý push do master:
+            build -> push do ACR -> deploy DEV (automaticky) -> deploy PROD (manual
+            approval gate, čeká na odkliknutí).
+PROSTŘEDÍ:  DEV  = todolist-dev (SQLite ephemeral, zdarma) – sem se nasazuje automaticky;
+            PROD = app-containerapp-01 (Azure SQL + Azure Files) – jen po schválení.
+MOŽNÉ DÁL:  CI s automatickými testy na pushi (dotnet test / vitest), dev s vlastní DB,
+            varianta Azure DevOps, otužení (startup probe / SQL auto-pause).
 ================================================================================
