@@ -645,3 +645,32 @@ PROSTŘEDÍ:  DEV  = todolist-dev (SQLite ephemeral, zdarma) – sem se nasazuje
 MOŽNÉ DÁL:  CI s automatickými testy na pushi (dotnet test / vitest), dev s vlastní DB,
             varianta Azure DevOps, otužení (startup probe / SQL auto-pause).
 ================================================================================
+
+
+================================================================================
+  BĚŽNÝ POSTUP – CO DĚLÁM RUČNĚ (zbytek řeší pipeline)
+================================================================================
+Pipeline (cd.yml) na každý push automaticky: postaví image -> pushne do ACR ->
+nasadí na DEV. Ručně tedy dělám jen tohle:
+
+  1) Upravím kód a ověřím lokálně:
+       - rychle: dev server (npm run dev) na http://localhost:6173
+       - nebo jako produkční build: .\build.ps1 a spuštěný exe na http://localhost:6001
+
+  2) Commitnu a pushnu:
+       git add -A
+       git commit -m "popis změny"
+       git push
+     -> tím se SPUSTÍ pipeline (build + push do ACR + deploy na DEV proběhnou samy).
+
+  3) Otestuji na DEV (po doběhnutí jobu deploy-dev):
+       https://todolist-dev.salmondune-4d937f62.northeurope.azurecontainerapps.io
+     (první načtení po nečinnosti pár sekund – DEV škáluje na 0)
+
+  4) Když je DEV OK, schválím PROD deploy (approval gate):
+       GitHub -> Actions -> daný běh -> "Review deployments" -> production -> Approve
+     -> teprve pak se stejná image nasadí na PROD (app-containerapp-01, Azure SQL).
+
+POZN.: build / push do ACR / deploy na DEV NEDĚLÁM ručně – jsou automatické.
+Ruční Docker build má smysl jen pro test mimo git (docker build + docker run -p 8080:8080).
+================================================================================
