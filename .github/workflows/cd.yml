@@ -9,7 +9,8 @@ env:
   ACR: acrtodolist783a4e6d.azurecr.io
   IMAGE: todolist2
   RG: rg-containerapp-test-01
-  APP: app-containerapp-01
+  APP: app-containerapp-01     # prod
+  APP_DEV: todolist-dev        # dev (SQLite ephemeral)
 
 jobs:
   build:
@@ -27,15 +28,27 @@ jobs:
           docker push "$ACR/$IMAGE:${{ github.sha }}"
           docker push "$ACR/$IMAGE:latest"
 
-  deploy:
+  deploy-dev:
     needs: build
-    runs-on: ubuntu-latest
-    environment: production      # APPROVAL GATE – čeká na tvé odkliknutí na GitHubu
+    runs-on: ubuntu-latest      # bez gate -> nasadí se automaticky
     steps:
       - uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
       - name: Ensure containerapp extension
         run: az extension add --name containerapp --only-show-errors
-      - name: Deploy new revision to Container Apps
+      - name: Deploy to DEV
+        run: az containerapp update -n "$APP_DEV" -g "$RG" --image "$ACR/$IMAGE:${{ github.sha }}"
+
+  deploy-prod:
+    needs: deploy-dev           # do prod až po úspěšném dev
+    runs-on: ubuntu-latest
+    environment: production      # APPROVAL GATE – čeká na tvé odkliknutí
+    steps:
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Ensure containerapp extension
+        run: az extension add --name containerapp --only-show-errors
+      - name: Deploy to PROD
         run: az containerapp update -n "$APP" -g "$RG" --image "$ACR/$IMAGE:${{ github.sha }}"

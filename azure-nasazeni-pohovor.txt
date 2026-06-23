@@ -487,8 +487,9 @@ Co pokrývá:  GIT      = spouštěč (push do repa Stepan-vondrich/todolist2)
              LOCALHOST= NELZE. GitHub runner běží v cloudu a na tvůj počítač
                         (:5000/:6001) nevidí. Localhost se dělá lokálně přes
                         build.ps1, nebo by to vyžadovalo self-hosted runner na PC.
-Dva joby: build (bez gate) -> deploy (environment: production = APPROVAL GATE,
-čeká na ruční odkliknutí na GitHubu).
+Tři joby: build -> deploy-dev (AUTOMATICKY, bez gate) -> deploy-prod
+(environment: production = APPROVAL GATE, čeká na ruční odkliknutí na GitHubu).
+Dev = Container App "todolist-dev" (SQLite ephemeral, zdarma), stejná RG i ACR.
 
 # .github/workflows/cd.yml
 name: CD - build & deploy to Azure
@@ -500,7 +501,8 @@ env:
   ACR: acrtodolist783a4e6d.azurecr.io
   IMAGE: todolist2
   RG: rg-containerapp-test-01
-  APP: app-containerapp-01
+  APP: app-containerapp-01     # prod
+  APP_DEV: todolist-dev        # dev (SQLite ephemeral)
 jobs:
   build:                                             # AZURE: artefakt do ACR
     runs-on: ubuntu-latest
@@ -513,8 +515,16 @@ jobs:
           docker build -t "$ACR/$IMAGE:${{ github.sha }}" -t "$ACR/$IMAGE:latest" .
           docker push "$ACR/$IMAGE:${{ github.sha }}"
           docker push "$ACR/$IMAGE:latest"
-  deploy:                                            # AZURE: nová revize
+  deploy-dev:                                        # AZURE: nasadí se AUTOMATICKY (bez gate)
     needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v2
+        with: { creds: ${{ secrets.AZURE_CREDENTIALS }} }
+      - run: az extension add --name containerapp --only-show-errors
+      - run: az containerapp update -n "$APP_DEV" -g "$RG" --image "$ACR/$IMAGE:${{ github.sha }}"
+  deploy-prod:                                       # AZURE: až po dev a po schválení
+    needs: deploy-dev
     runs-on: ubuntu-latest
     environment: production                          # <- APPROVAL GATE (ruční schválení)
     steps:
@@ -538,18 +548,27 @@ az role assignment create --assignee <clientId-SP> --role AcrPush \
 --------------------------------------------------------------------------------
 7) PROSTŘEDÍ   (dev/prod jako dvě Container Apps nebo dvě resource groups)
 --------------------------------------------------------------------------------
-[RUČNĚ – jen prod] Reálně existuje JEDNO prostředí: Container Apps Environment
-"env-containerapp-ne-01", app "app-containerapp-01", RG "rg-containerapp-test-01".
-Dev/prod oddělení jsem NEdělal.
+[OK – NASAZENO] Dvě Container Apps ve SPOLEČNÉ RG i environmentu (nejlevnější
+varianta; SP má práva na celou RG, takže pipeline spravuje obě):
+  PROD: app-containerapp-01  -> Azure SQL + Azure Files (perzistentní)
+  DEV:  todolist-dev         -> SQLite ephemeral (bez SQL conn / volume = ZDARMA),
+        https://todolist-dev.salmondune-4d937f62.northeurope.azurecontainerapps.io
 
-[N/A] Jak bych udělal dev + prod (dvě resource groups, sdílené ACR):
-# DEV
-az group create -n rg-todolist-dev -l northeurope
-az containerapp env create -n env-dev -g rg-todolist-dev -l northeurope
-az containerapp create -n todolist-dev -g rg-todolist-dev --environment env-dev \
-  --image acrtodolist783a4e6d.azurecr.io/todolist2:latest --target-port 8080 --ingress external
-# PROD (analogicky rg-todolist-prod / env-prod / todolist-prod)
-# Liší se jen RG/název a nasazovaný tag; registr ACR může být společný.
+Reálně provedený příkaz (vytvoření dev appky; vyžaduje AVG HTTPS scan vyplý):
+u=$(az acr credential show -n acrtodolist783a4e6d --query username -o tsv)
+p=$(az acr credential show -n acrtodolist783a4e6d --query passwords[0].value -o tsv)
+az containerapp create -n todolist-dev -g rg-containerapp-test-01 \
+  --environment env-containerapp-ne-01 \
+  --image acrtodolist783a4e6d.azurecr.io/todolist2:latest \
+  --target-port 8080 --ingress external \
+  --registry-server acrtodolist783a4e6d.azurecr.io --registry-username "$u" --registry-password "$p" \
+  --min-replicas 0 --max-replicas 1
+# dev běží bez AZURE_SQL_CONNECTION -> appka spadne na SQLite (ephemeral) = bez nákladů.
+# pipeline pak dev jen update-uje (job deploy-dev, viz bod 6).
+
+[N/A] Tvrdší oddělení (kdyby bylo třeba): každé prostředí ve VLASTNÍ resource group
+(rg-todolist-dev / rg-todolist-prod), vlastní environment, sdílené ACR; SP by pak
+potřeboval práva na obě RG. Pro tenhle projekt zbytečné.
 
 --------------------------------------------------------------------------------
 8) GATES   (manual approval před prod deploy)
