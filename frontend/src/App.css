@@ -1296,22 +1296,19 @@ h1 {
   margin-bottom: 4px;
 }
 
-/* On phones/tablets the fixed 420px picker is wider than the screen. Pin it to the
-   viewport edges instead of a centered 100vw box — on iOS Safari a centered 100vw
-   child can shift left and clip the item text ("targets hidden on the left"). */
+/* On phones the fixed 420px picker is wider than the screen and its text got clipped
+   on the left (full-bleed 100vw / fixed-inset misbehaves on iOS Safari). Anchor it to
+   the top (next to the form) and size it to the screen WITH small side margins so the
+   target names are never clipped. */
 @media (max-width: 1000px) {
   .move-overlay {
-    align-items: stretch;
-    justify-content: stretch;
+    align-items: flex-start;
   }
   .move-picker {
-    position: fixed;
-    inset: 0;
-    width: auto;
-    max-width: none;
-    height: auto;
-    max-height: none;
-    border-radius: 0;
+    width: 94vw;
+    max-width: 94vw;
+    margin-top: 8px;
+    max-height: 90vh;
   }
 }
 
