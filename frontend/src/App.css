@@ -1296,6 +1296,18 @@ h1 {
   margin-bottom: 4px;
 }
 
+/* On phones/tablets the fixed 420px picker is wider than the screen and overflows.
+   Make it full-screen so it's fully visible — same approach as the comments panel. */
+@media (max-width: 1000px) {
+  .move-picker {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+}
+
 .delete-btn {
   background: none;
   border: none;
