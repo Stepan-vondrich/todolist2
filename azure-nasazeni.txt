@@ -543,10 +543,21 @@ jobs:
     runs-on: ubuntu-latest
     environment: production                          # <- APPROVAL GATE (ruční schválení)
     steps:
+      - uses: actions/checkout@v4
       - uses: azure/login@v2
         with: { creds: ${{ secrets.AZURE_CREDENTIALS }} }
+      # PROD DB schéma: EnsureCreated nemigruje, takže nové sloupce přidává tento
+      # idempotentní skript (db/prod-schema.sql) PŘED nasazením image.
+      - uses: azure/sql-action@v2
+        with:
+          connection-string: ${{ secrets.AZURE_SQL_CONNECTION }}
+          path: ./db/prod-schema.sql
       - run: az extension add --name containerapp --only-show-errors
       - run: az containerapp update -n "$APP" -g "$RG" --image "$ACR/$IMAGE:${{ github.sha }}"
+
+# db/prod-schema.sql = idempotentní ALTER TABLE (guard přes COL_LENGTH), spouští se
+# v deploy-prod jobu při každém produkčním nasazení. Nové sloupce se jen přidávají
+# na konec skriptu. Tím se řeší, že prod (Azure SQL/EnsureCreated) sám nemigruje.
 
 # JEDNORÁZOVÉ NASTAVENÍ – reálně provedené příkazy [OK]:
 # 1) Service principal (contributor na resource group) -> rovnou do GitHub secretu:
