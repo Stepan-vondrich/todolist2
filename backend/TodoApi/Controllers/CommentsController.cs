@@ -77,9 +77,27 @@ public class CommentsController(AppDbContext db) : ControllerBase
             // Index searchable text from document-type attachments (docx/xlsx/pptx/
             // pdf/txt/csv/json/…) so global search can match their contents. Read it
             // back from the file we just wrote; null for media/unsupported formats.
-            string? extractedText = type == "file"
-                ? AttachmentTextExtractor.Extract(await System.IO.File.ReadAllBytesAsync(filePath), fileEntry.FileName)
-                : null;
+            string? extractedText = null;
+            string? pageTextsJson = null;
+            if (type == "file")
+            {
+                var bytes = await System.IO.File.ReadAllBytesAsync(filePath);
+                if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Read the PDF once: per-page texts power the page jump, and the
+                    // flat searchable text is just those joined (no second pass).
+                    var pages = AttachmentTextExtractor.ExtractPdfPages(bytes);
+                    if (pages is not null)
+                    {
+                        pageTextsJson = System.Text.Json.JsonSerializer.Serialize(pages);
+                        extractedText = AttachmentTextExtractor.FlattenPages(pages);
+                    }
+                }
+                else
+                {
+                    extractedText = AttachmentTextExtractor.Extract(bytes, fileEntry.FileName);
+                }
+            }
 
             string? previewPath = null;
             var previewEntry = form.Files[$"preview_{indexStr}"];
@@ -102,6 +120,7 @@ public class CommentsController(AppDbContext db) : ControllerBase
                 Preview = previewPath,
                 SortOrder = sortOrder++,
                 ExtractedText = extractedText,
+                PageTexts = pageTextsJson,
             });
         }
 

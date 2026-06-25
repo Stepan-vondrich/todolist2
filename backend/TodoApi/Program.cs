@@ -56,7 +56,9 @@ using (var scope = app.Services.CreateScope())
     // so this loop finds nothing and is effectively free on later startups.
     var uploadsRoot = TodoApi.DataPaths.Uploads;
     var pending = db.CommentAttachments
-        .Where(a => a.Type == "file" && a.ExtractedText == null)
+        .Where(a => a.Type == "file"
+            && (a.ExtractedText == null
+                || (a.PageTexts == null && a.Path.ToLower().EndsWith(".pdf"))))
         .ToList();
     foreach (var att in pending)
     {
@@ -64,9 +66,23 @@ using (var scope = app.Services.CreateScope())
         {
             var file = Path.Combine(uploadsRoot, Path.GetFileName(att.Path));
             if (!File.Exists(file)) continue;
-            var text = AttachmentTextExtractor.Extract(File.ReadAllBytes(file), att.Path);
-            // Mark as processed either way (empty string) so we don't retry every boot.
-            att.ExtractedText = text ?? "";
+            var bytes = File.ReadAllBytes(file);
+            if (att.Path.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                // Read the PDF once; derive both per-page and flat text from it.
+                var pages = AttachmentTextExtractor.ExtractPdfPages(bytes);
+                if (pages is not null)
+                {
+                    att.PageTexts ??= System.Text.Json.JsonSerializer.Serialize(pages);
+                    att.ExtractedText ??= AttachmentTextExtractor.FlattenPages(pages);
+                }
+                // Mark as processed even if extraction failed, so we don't retry every boot.
+                att.ExtractedText ??= "";
+            }
+            else if (att.ExtractedText == null)
+            {
+                att.ExtractedText = AttachmentTextExtractor.Extract(bytes, att.Path) ?? "";
+            }
         }
         catch { /* skip unreadable file, retry next boot */ }
     }

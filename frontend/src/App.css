@@ -1712,6 +1712,36 @@ h1 {
 }
 .pdf-overlay-newtab:hover { background: rgba(255,255,255,0.3); color: #fff; }
 
+/* Match navigation bar (N / M + arrows) shown top-center over the open PDF. */
+.pdf-match-nav {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(30,30,35,0.92);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+  font-size: 0.85rem;
+}
+.pdf-match-nav button {
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.pdf-match-nav button:hover { background: rgba(255,255,255,0.2); }
+.pdf-match-count { min-width: 56px; text-align: center; font-variant-numeric: tabular-nums; }
+
 .pdf-overlay-frame {
   width: 92vw;
   height: 94vh;
@@ -1733,7 +1763,6 @@ h1 {
   flex-direction: column;
   align-items: center;
   padding: 16px 0;
-  gap: 12px;
 }
 .pdf-viewer-pages {
   display: flex;
@@ -1742,9 +1771,21 @@ h1 {
   gap: 12px;
   width: 100%;
 }
+/* Each page: canvas with a position-aligned, selectable text layer stacked on top. */
+.pdf-page {
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  flex-shrink: 0;
+  background: #fff; /* visible while the page is still a placeholder */
+}
+/* A page not yet rendered (lazy): faint shimmer so the scroll height is honest. */
+.pdf-page--pending {
+  background: repeating-linear-gradient(
+    180deg, #efefef 0, #efefef 24px, #e7e7e7 24px, #e7e7e7 48px);
+  opacity: 0.5;
+}
 .pdf-viewer-canvas {
   max-width: 100%;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
   display: block;
 }
 /* The PDF page that contains the search match — briefly outlined when jumped to. */
@@ -1752,13 +1793,30 @@ h1 {
   outline: 3px solid #6366f1;
   animation: viewer-match-fade 2s ease-out;
 }
-/* Highlighted run inside a txt/docx viewer when opened from a search hit. */
+
+/* pdf.js text layer positioning comes from the official pdf_viewer.css imported
+   in CommentsPanel; here we just stack it over the canvas. */
+.pdf-text-layer { z-index: 2; }
+.pdf-text-layer ::selection { background: rgba(99,102,241,0.3); }
+
+/* Highlighted run inside a txt/docx viewer or PDF text layer (a search hit).
+   In the PDF text layer the glyphs live on the canvas underneath, so the
+   highlight is translucent to let the real text show through. */
 .viewer-match {
-  background: #fde68a;
-  color: inherit;
+  background: rgba(253, 224, 71, 0.55);
+  color: transparent;
   border-radius: 2px;
-  padding: 0 1px;
 }
+/* In txt/docx the text IS the content, so show it. */
+.txt-viewer-content .viewer-match,
+.docx-viewer-content .viewer-match { color: inherit; background: #fde68a; padding: 0 1px; }
+/* The currently-focused match while stepping through with the arrows. */
+.viewer-match.viewer-match--active {
+  background: rgba(251, 146, 60, 0.55);
+  outline: 2px solid rgba(234, 88, 12, 0.8);
+}
+.txt-viewer-content .viewer-match--active,
+.docx-viewer-content .viewer-match--active { background: #fb923c; }
 @keyframes viewer-match-fade {
   0% { outline-color: #6366f1; }
   100% { outline-color: rgba(99, 102, 241, 0); }

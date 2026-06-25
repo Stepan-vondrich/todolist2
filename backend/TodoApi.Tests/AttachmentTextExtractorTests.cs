@@ -109,6 +109,40 @@ public class AttachmentTextExtractorTests
         Assert.Contains("ObsahPdfDokumentu", text);
     }
 
+    [Fact]
+    public void ExtractPdfPages_ReturnsOneEntryPerPage_WithTextOnTheRightPage()
+    {
+        var bytes = BuildMultiPagePdf("Strana jedna", "Strana dva", "HledanyVyrazNaTreti");
+        var pages = AttachmentTextExtractor.ExtractPdfPages(bytes);
+
+        Assert.NotNull(pages);
+        Assert.Equal(3, pages!.Count);
+        Assert.Contains("HledanyVyrazNaTreti", pages[2]);
+        Assert.DoesNotContain("HledanyVyrazNaTreti", pages[0]);
+        Assert.DoesNotContain("HledanyVyrazNaTreti", pages[1]);
+    }
+
+    [Fact]
+    public void ExtractPdfPages_ReturnsNull_ForNonPdf()
+    {
+        Assert.Null(AttachmentTextExtractor.ExtractPdfPages(System.Text.Encoding.UTF8.GetBytes("hello")));
+    }
+
+    [Fact]
+    public void Extract_ForPdf_EqualsPagesJoinedBySpace()
+    {
+        // Upload reads a PDF only once: the flat searchable text is the per-page
+        // texts joined with a space. This guards that the merged single-pass
+        // extraction stays equivalent to the old flat text.
+        var bytes = BuildMultiPagePdf("Strana jedna text", "Strana dva text", "Strana tri text");
+        var flat = AttachmentTextExtractor.Extract(bytes, "k.pdf");
+        var pages = AttachmentTextExtractor.ExtractPdfPages(bytes);
+
+        Assert.NotNull(flat);
+        Assert.NotNull(pages);
+        Assert.Equal(string.Join(" ", pages!).Trim(), flat!.Trim());
+    }
+
     // ── builders for valid in-memory Office files ─────────────────────────────
 
     static byte[] BuildDocx(string paragraph)
@@ -152,6 +186,18 @@ public class AttachmentTextExtractorTests
         var font = builder.AddStandard14Font(Standard14Font.Helvetica);
         var page = builder.AddPage(595, 842); // A4
         page.AddText(text, 12, new UglyToad.PdfPig.Core.PdfPoint(50, 800), font);
+        return builder.Build();
+    }
+
+    static byte[] BuildMultiPagePdf(params string[] pageTexts)
+    {
+        var builder = new PdfDocumentBuilder();
+        var font = builder.AddStandard14Font(Standard14Font.Helvetica);
+        foreach (var t in pageTexts)
+        {
+            var page = builder.AddPage(595, 842);
+            page.AddText(t, 12, new UglyToad.PdfPig.Core.PdfPoint(50, 800), font);
+        }
         return builder.Build();
     }
 

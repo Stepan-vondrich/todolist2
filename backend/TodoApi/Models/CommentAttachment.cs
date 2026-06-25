@@ -16,4 +16,8 @@ public class CommentAttachment
     // so global search can match the file's contents. Null = not a text-bearing file
     // (image/video) or extraction failed/not yet indexed.
     public string? ExtractedText { get; set; }
+    // For PDFs: JSON string[] of per-page text, so search can record which page a
+    // hit is on and the viewer can open there directly. Null for non-PDF or legacy
+    // attachments (fall back to scanning pages in the browser).
+    public string? PageTexts { get; set; }
 }

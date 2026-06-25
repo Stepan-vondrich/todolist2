@@ -7,8 +7,8 @@ interface Props {
   // Expand ancestors / clear filters so the todo is rendered, then scroll + flash it.
   onReveal: (id: number) => void
   // Open the comments panel for a todo AND jump its viewer to where `query`
-  // matches inside the given attachment file.
-  onOpenAttachment: (todoId: number, attachmentPath: string, query: string) => void
+  // matches inside the given attachment file (optionally on a known PDF page).
+  onOpenAttachment: (todoId: number, attachmentPath: string, query: string, page?: number | null) => void
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -69,12 +69,12 @@ export default function SearchPanel({ onClose, onOpenComments, onReveal, onOpenA
     onReveal(todoId)
   }
 
-  function handleAttachmentClick(e: React.MouseEvent, todoId: number, attachmentPath?: string | null) {
+  function handleAttachmentClick(e: React.MouseEvent, todoId: number, attachmentPath?: string | null, page?: number | null) {
     e.stopPropagation()
     onClose()
     if (attachmentPath) {
       // Open the panel and jump the document viewer to the matching page/place.
-      onOpenAttachment(todoId, attachmentPath, query.trim())
+      onOpenAttachment(todoId, attachmentPath, query.trim(), page)
     } else {
       onOpenComments(todoId)
     }
@@ -150,7 +150,7 @@ export default function SearchPanel({ onClose, onOpenComments, onReveal, onOpenA
                     <div
                       key={i}
                       className="search-result-comment"
-                      onClick={e => handleAttachmentClick(e, result.todoId, m.attachmentPath)}
+                      onClick={e => handleAttachmentClick(e, result.todoId, m.attachmentPath, m.pageNumber)}
                       title="Otevřít dokument na místě shody"
                     >
                       <span className="search-result-comment-label">📎 {m.fileName || 'příloha'}</span>

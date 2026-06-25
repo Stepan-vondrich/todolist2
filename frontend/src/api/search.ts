@@ -5,6 +5,7 @@ export interface SearchMatch {
   fileName?: string | null      // attachment matches: a short type hint, e.g. "DOCX"
   displayName?: string | null   // attachment matches: original file name to show as a heading
   attachmentPath?: string | null // attachment matches: served URL of the file (/uploads/…)
+  pageNumber?: number | null    // attachment matches (PDF): 1-based page of the first hit
 }
 
 export interface SearchResult {

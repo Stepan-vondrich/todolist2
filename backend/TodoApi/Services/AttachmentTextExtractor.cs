@@ -116,13 +116,32 @@ public static class AttachmentTextExtractor
         return sb.ToString();
     }
 
-    static string ExtractPdf(byte[] bytes)
+    static string ExtractPdf(byte[] bytes) =>
+        string.Join(" ", ExtractPdfPages(bytes) ?? new List<string>());
+
+    /// <summary>
+    /// Flatten already-extracted page texts into the single searchable string,
+    /// so callers that have the pages don't re-open the PDF a second time.
+    /// </summary>
+    public static string FlattenPages(IEnumerable<string> pages) => string.Join(" ", pages);
+
+    /// <summary>
+    /// Extract a PDF's text split by page (one list entry per page, in order), so
+    /// search can record which page a hit is on and the viewer can open there
+    /// directly. Returns null for non-PDF bytes or on failure.
+    /// </summary>
+    public static List<string>? ExtractPdfPages(byte[] bytes)
     {
-        using var ms = new MemoryStream(bytes);
-        using var pdf = PdfDocument.Open(ms);
-        var sb = new StringBuilder();
-        foreach (var page in pdf.GetPages())
-            sb.Append(page.Text).Append(' ');
-        return sb.ToString();
+        if (bytes is null || bytes.Length == 0) return null;
+        try
+        {
+            using var ms = new MemoryStream(bytes);
+            using var pdf = PdfDocument.Open(ms);
+            return pdf.GetPages().Select(p => p.Text ?? "").ToList();
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

@@ -73,7 +73,7 @@ export default function App() {
   const [openCommentsTodoId, setOpenCommentsTodoId] = useState<number | null>(null)
   // When a search hit inside an attachment is clicked, this asks CommentsPanel to
   // open that file's viewer and jump to where `query` matches. Cleared once consumed.
-  const [docJump, setDocJump] = useState<{ path: string; query: string } | null>(null)
+  const [docJump, setDocJump] = useState<{ path: string; query: string; page?: number } | null>(null)
   const [commentsByTodo, setCommentsByTodo] = useState<Record<number, Comment[]>>({})
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({})
   const [activeTodoIds, setActiveTodoIds] = useState<Set<number>>(new Set())
@@ -411,8 +411,8 @@ export default function App() {
 
   // From a search hit inside an attachment: open the todo's comments and tell the
   // panel which file to open and what term to jump to.
-  async function handleOpenAttachment(todoId: number, attachmentPath: string, query: string) {
-    setDocJump({ path: attachmentPath, query })
+  async function handleOpenAttachment(todoId: number, attachmentPath: string, query: string, page?: number | null) {
+    setDocJump({ path: attachmentPath, query, page: page ?? undefined })
     setOpenCommentsTodoId(todoId)
     if (!commentsByTodo[todoId]) {
       try {

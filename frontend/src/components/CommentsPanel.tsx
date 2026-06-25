@@ -3,10 +3,11 @@ import heic2any from 'heic2any'
 import { convertToHtml as mammothConvertToHtml } from 'mammoth/mammoth.browser.min.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import 'pdfjs-dist/web/pdf_viewer.css' // official text-layer positioning styles
 import type { Comment, CommentAttachment, TaskSession, TaskLog } from '../types'
 import { fetchSessions, deleteSession, updateSession } from '../api/taskSessions'
 import { fetchLogs } from '../api/taskLogs'
-import { normalizeForSearch, findMatchIndex } from '../utils/findMatch'
+import { findMatchIndex, findAllMatchRangesIgnoringSpace } from '../utils/findMatch'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
@@ -408,9 +409,81 @@ async function processFile(raw: File): Promise<PendingItem> {
   }
 }
 
-// --- PDF viewer (canvas-based, no iframe) ---
+// --- PDF viewer (canvas + selectable text layer, no iframe) ---
 
-function PdfViewer({ src, query }: { src: string; query?: string }) {
+// Highlight every occurrence of `query` across a page's text-layer spans, even
+// when a phrase ("lžíce oliv", "celé kuře") spans several spans or is split by a
+// line break. We concatenate span texts into one page string with a position map,
+// find whitespace-insensitive ranges, then wrap the touched slice in each span.
+// The first <mark> of each occurrence is pushed to `sink` for nav stepping.
+function highlightSpans(spans: HTMLElement[], query: string, sink: HTMLElement[]) {
+  // Build the page text and a map: global index → { span, offset within span }.
+  let pageText = ''
+  const map: { spanIdx: number; offset: number }[] = []
+  spans.forEach((span, spanIdx) => {
+    const text = span.textContent ?? ''
+    for (let i = 0; i < text.length; i++) { pageText += text[i]; map.push({ spanIdx, offset: i }) }
+    // A separator between spans so adjacent words don't fuse; it maps to nothing.
+    if (spanIdx < spans.length - 1) { pageText += '\n'; map.push({ spanIdx: -1, offset: -1 }) }
+  })
+
+  const ranges = findAllMatchRangesIgnoringSpace(pageText, query)
+  if (ranges.length === 0) return
+
+  // For each occurrence, collect the [start,end) sub-range it covers per span.
+  // spanRanges[spanIdx] = array of {from,to,first} slices to wrap.
+  const perSpan = new Map<number, { from: number; to: number; first: boolean }[]>()
+  for (const { start, end } of ranges) {
+    let firstOfOccurrence = true
+    let g = start
+    while (g < end) {
+      const m = map[g]
+      if (!m || m.spanIdx < 0) { g++; continue }
+      const spanIdx = m.spanIdx
+      const from = m.offset
+      // Extend within the same span as far as this occurrence reaches.
+      let to = from
+      while (g < end && map[g] && map[g].spanIdx === spanIdx) { to = map[g].offset + 1; g++ }
+      const list = perSpan.get(spanIdx) ?? []
+      list.push({ from, to, first: firstOfOccurrence })
+      perSpan.set(spanIdx, list)
+      firstOfOccurrence = false
+    }
+  }
+
+  // Rebuild each touched span's content with <mark> wrappers.
+  for (const [spanIdx, slices] of perSpan) {
+    const span = spans[spanIdx]
+    const text = span.textContent ?? ''
+    slices.sort((a, b) => a.from - b.from)
+    const frag = document.createDocumentFragment()
+    let cursor = 0
+    for (const { from, to, first } of slices) {
+      if (from > cursor) frag.appendChild(document.createTextNode(text.slice(cursor, from)))
+      const mark = document.createElement('mark')
+      mark.className = 'viewer-match'
+      mark.textContent = text.slice(from, to)
+      frag.appendChild(mark)
+      if (first) sink.push(mark) // only the first piece of each occurrence drives nav
+      cursor = to
+    }
+    if (cursor < text.length) frag.appendChild(document.createTextNode(text.slice(cursor)))
+    span.textContent = ''
+    span.appendChild(frag)
+  }
+}
+
+// One search occurrence in a PDF: which page, and its order among that page's hits.
+interface PdfOccurrence { page: number; indexOnPage: number }
+
+function PdfViewer({ src, query, initialPage, onNav }: {
+  src: string
+  query?: string
+  initialPage?: number
+  // Hands the parent the total occurrence count and a goTo(globalIndex) that
+  // renders the right page (if lazy) then scrolls to + activates that match.
+  onNav?: (info: { total: number; goTo: (globalIndex: number) => void }) => void
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<'loading' | 'done' | 'error'>('loading')
 
@@ -419,58 +492,151 @@ function PdfViewer({ src, query }: { src: string; query?: string }) {
     const container = containerRef.current
     if (!container) return
 
-    // clear previous canvases
     container.innerHTML = ''
     setStatus('loading')
+    const q = query?.trim() ?? ''
+    const SCALE = 1.8
+    let cleanup = () => {}
 
     ;(async () => {
       try {
         const pdf = await pdfjsLib.getDocument(src).promise
-        const normQuery = query ? normalizeForSearch(query.trim()) : ''
-        let matchCanvas: HTMLCanvasElement | null = null
+        if (cancelled) return
 
+        const pageDivs: HTMLElement[] = []
+        const rendered = new Set<number>()
+
+        // Render one page's canvas + text layer + highlights (idempotent).
+        const renderPage = async (i: number) => {
+          if (rendered.has(i) || cancelled) return
+          rendered.add(i)
+          const pageDiv = pageDivs[i - 1]
+          try {
+            const page = await pdf.getPage(i)
+            const viewport = page.getViewport({ scale: SCALE })
+            const canvas = document.createElement('canvas')
+            canvas.width = viewport.width
+            canvas.height = viewport.height
+            canvas.className = 'pdf-viewer-canvas'
+            pageDiv.appendChild(canvas)
+            const ctx = canvas.getContext('2d')!
+            await page.render({ canvasContext: ctx, viewport, canvas }).promise
+            if (cancelled) return
+
+            const textContent = await page.getTextContent()
+            const textDiv = document.createElement('div')
+            textDiv.className = 'pdf-text-layer textLayer'
+            pageDiv.appendChild(textDiv)
+            const tl = new pdfjsLib.TextLayer({ textContentSource: textContent, container: textDiv, viewport })
+            await tl.render()
+            if (cancelled) return
+
+            pageDiv.classList.remove('pdf-page--pending')
+            if (q) highlightSpans(tl.textDivs as unknown as HTMLElement[], q, [])
+          } catch {
+            rendered.delete(i) // allow a retry on next scroll
+          }
+        }
+
+        // 1) Lay out placeholders for every page (cheap: only needs sizes).
         for (let i = 1; i <= pdf.numPages; i++) {
           if (cancelled) return
           const page = await pdf.getPage(i)
-          const viewport = page.getViewport({ scale: 1.8 })
-          const canvas = document.createElement('canvas')
-          canvas.width = viewport.width
-          canvas.height = viewport.height
-          canvas.className = 'pdf-viewer-canvas'
-          container.appendChild(canvas)
-          const ctx = canvas.getContext('2d')!
-          await page.render({ canvasContext: ctx, viewport, canvas }).promise
-          if (cancelled) return
-
-          // First page whose text contains the query → remember it to jump to.
-          if (normQuery && !matchCanvas) {
-            const content = await page.getTextContent()
-            const pageText = content.items.map(it => ('str' in it ? it.str : '')).join(' ')
-            if (normalizeForSearch(pageText).includes(normQuery)) matchCanvas = canvas
-          }
+          const viewport = page.getViewport({ scale: SCALE })
+          const pageDiv = document.createElement('div')
+          pageDiv.className = 'pdf-page pdf-page--pending'
+          pageDiv.style.width = `${viewport.width}px`
+          pageDiv.style.height = `${viewport.height}px`
+          pageDiv.style.setProperty('--total-scale-factor', String(SCALE))
+          pageDiv.style.setProperty('--scale-factor', String(SCALE))
+          container.appendChild(pageDiv)
+          pageDivs.push(pageDiv)
         }
-        if (!cancelled) setStatus('done')
+        if (cancelled) return
+        setStatus('done')
 
-        // Jump to the matching page once everything is laid out.
-        if (matchCanvas && !cancelled) {
-          requestAnimationFrame(() => {
-            matchCanvas!.scrollIntoView({ behavior: 'smooth', block: 'start' })
-            matchCanvas!.classList.add('pdf-page-match')
-            setTimeout(() => matchCanvas?.classList.remove('pdf-page-match'), 2000)
-          })
+        // 2) Render pages as they near the viewport. The scrolling element is the
+        //    container's parent (.pdf-viewer-scroll); .pdf-viewer-pages just lists them.
+        const scrollRoot = container.parentElement
+        const io = new IntersectionObserver((entries) => {
+          for (const e of entries) {
+            if (e.isIntersecting) renderPage(pageDivs.indexOf(e.target as HTMLElement) + 1)
+          }
+        }, { root: scrollRoot, rootMargin: '1200px 0px' })
+        pageDivs.forEach(d => io.observe(d))
+        cleanup = () => io.disconnect()
+
+        // 3) Jump straight to the search-hinted page (or page 1) for an instant open.
+        const target = initialPage && initialPage >= 1 && initialPage <= pdf.numPages ? initialPage : 1
+        await renderPage(target)
+        if (cancelled) return
+        requestAnimationFrame(() => {
+          const firstOnPage = pageDivs[target - 1].querySelector<HTMLElement>('.viewer-match')
+          ;(firstOnPage ?? pageDivs[target - 1]).scrollIntoView({ behavior: 'auto', block: firstOnPage ? 'center' : 'start' })
+          firstOnPage?.classList.add('viewer-match--active')
+        })
+
+        // 4) Background scan of every page's text (no canvas) to know the TOTAL
+        //    occurrence count and each one's page, so the nav bar is accurate and
+        //    arrows can jump to matches on not-yet-rendered pages.
+        if (q && onNav) {
+          const occ: PdfOccurrence[] = []
+          // Cache each page's text so we can also test page-spanning phrases.
+          const pageTexts: string[] = []
+          for (let i = 1; i <= pdf.numPages; i++) {
+            if (cancelled) return
+            const page = await pdf.getPage(i)
+            const tc = await page.getTextContent()
+            pageTexts[i - 1] = tc.items.map(it => ('str' in it ? it.str : '')).join('\n')
+            const ranges = findAllMatchRangesIgnoringSpace(pageTexts[i - 1], q)
+            ranges.forEach((_, k) => occ.push({ page: i, indexOnPage: k }))
+            // A phrase split across the i-1 / i break appears in neither page alone.
+            // Count it once, attributed to the earlier page (where its start lives).
+            if (i > 1) {
+              const here = ranges.length
+              const prev = findAllMatchRangesIgnoringSpace(pageTexts[i - 2], q).length
+              const joined = findAllMatchRangesIgnoringSpace(pageTexts[i - 2] + '\n' + pageTexts[i - 1], q).length
+              if (joined > prev + here) occ.push({ page: i - 1, indexOnPage: -1 })
+            }
+          }
+          if (cancelled) return
+          // Keep occurrences in document order (page, then position).
+          occ.sort((a, b) => a.page - b.page || a.indexOnPage - b.indexOnPage)
+
+          const goTo = (gi: number) => {
+            if (occ.length === 0) return
+            const n = ((gi % occ.length) + occ.length) % occ.length
+            const { page, indexOnPage } = occ[n]
+            const reveal = () => {
+              const pageDiv = pageDivs[page - 1]
+              const marks = pageDiv.querySelectorAll<HTMLElement>('.viewer-match')
+              container.querySelectorAll('.viewer-match--active').forEach(m => m.classList.remove('viewer-match--active'))
+              // indexOnPage -1 marks a page-spanning occurrence (its visible piece
+              // is the last mark on this page); otherwise pick that occurrence's mark.
+              const el = indexOnPage < 0
+                ? marks[marks.length - 1]
+                : marks[Math.min(indexOnPage, marks.length - 1)]
+              if (el) { el.classList.add('viewer-match--active'); el.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
+              else pageDiv.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }
+            if (rendered.has(page)) reveal()
+            else renderPage(page).then(() => requestAnimationFrame(reveal))
+          }
+          onNav({ total: occ.length, goTo })
         }
       } catch {
         if (!cancelled) setStatus('error')
       }
     })()
 
-    return () => { cancelled = true }
-  }, [src, query])
+    return () => { cancelled = true; cleanup() }
+  }, [src, query, initialPage])
 
   return (
     <div className="pdf-viewer-scroll" onClick={e => e.stopPropagation()}>
       {status === 'loading' && <div className="pdf-viewer-loading">⏳ Načítám PDF…</div>}
       {status === 'error'   && <div className="pdf-viewer-loading">❌ PDF se nepodařilo načíst.</div>}
+      {/* This inner div is owned by the effect (manual DOM); keep it free of React children. */}
       <div ref={containerRef} className="pdf-viewer-pages" />
     </div>
   )
@@ -605,7 +771,7 @@ interface Props {
   onReveal?: (id: number) => void
   // When set (from a search hit), open this attachment's viewer and jump to the
   // place where `query` matches. Call onDocJumpConsumed once handled.
-  docJump?: { path: string; query: string } | null
+  docJump?: { path: string; query: string; page?: number } | null
   onDocJumpConsumed?: () => void
 }
 
@@ -678,14 +844,23 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
   const [fullscreenType, setFullscreenType] = useState<'image' | 'video' | 'pdf' | 'docx' | 'txt'>('image')
   // Search term to jump to inside a document viewer (empty = no jump).
   const [fullscreenQuery, setFullscreenQuery] = useState('')
+  // 1-based page a PDF search hit is on (from the index); undefined = scan in-browser.
+  const [fullscreenPage, setFullscreenPage] = useState<number | undefined>(undefined)
+  // PDF match navigation: total occurrences + a goTo from the viewer, and which
+  // one is currently focused (for the "N / M" bar).
+  const [pdfNav, setPdfNav] = useState<{ total: number; goTo: (i: number) => void } | null>(null)
+  const [activeMatch, setActiveMatch] = useState(0)
   const pendingBlobUrl = useRef<string | null>(null)
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null)
   const [editDraft, setEditDraft] = useState('')
 
-  function openFullscreen(src: string, type: 'image' | 'video' | 'pdf' | 'docx' | 'txt', query = '') {
+  function openFullscreen(src: string, type: 'image' | 'video' | 'pdf' | 'docx' | 'txt', query = '', page?: number) {
     setFullscreenSrc(src)
     setFullscreenType(type)
     setFullscreenQuery(query)
+    setFullscreenPage(page)
+    setPdfNav(null)
+    setActiveMatch(0)
   }
 
   function closeFullscreen() {
@@ -695,7 +870,31 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
     }
     setFullscreenSrc(null)
     setFullscreenQuery('')
+    setFullscreenPage(undefined)
+    setPdfNav(null)
   }
+
+  // Step to occurrence `index` (wraps); the viewer renders its page if needed.
+  function focusMatch(index: number) {
+    if (!pdfNav || pdfNav.total === 0) return
+    const n = ((index % pdfNav.total) + pdfNav.total) % pdfNav.total
+    setActiveMatch(n)
+    pdfNav.goTo(n)
+  }
+
+  // Keyboard stepping between matches while the PDF is open (Enter / Shift+Enter, F3).
+  useEffect(() => {
+    if (fullscreenType !== 'pdf' || !pdfNav || pdfNav.total === 0) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === 'F3') {
+        e.preventDefault()
+        focusMatch(activeMatch + (e.shiftKey ? -1 : 1))
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreenType, pdfNav, activeMatch])
 
   // A search hit inside an attachment asked us to open that file at the match.
   // Map the file extension to a viewer type and open it with the query.
@@ -703,7 +902,7 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
     if (!docJump) return
     const ext = (docJump.path.split('.').pop() ?? '').toLowerCase()
     const viewType = ext === 'pdf' ? 'pdf' : ext === 'docx' ? 'docx' : ext === 'txt' ? 'txt' : null
-    if (viewType) openFullscreen(docJump.path, viewType, docJump.query)
+    if (viewType) openFullscreen(docJump.path, viewType, docJump.query, docJump.page)
     onDocJumpConsumed?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docJump])
@@ -862,7 +1061,19 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
                 className="pdf-overlay-newtab" onClick={e => e.stopPropagation()}>
                 ↗ Otevřít v záložce
               </a>
-              <PdfViewer src={fullscreenSrc} query={fullscreenQuery} />
+              {fullscreenQuery && pdfNav && pdfNav.total > 0 && (
+                <div className="pdf-match-nav" onClick={e => e.stopPropagation()}>
+                  <button aria-label="Předchozí výskyt" onClick={() => focusMatch(activeMatch - 1)}>◀</button>
+                  <span className="pdf-match-count">{activeMatch + 1} / {pdfNav.total}</span>
+                  <button aria-label="Další výskyt" onClick={() => focusMatch(activeMatch + 1)}>▶</button>
+                </div>
+              )}
+              <PdfViewer
+                src={fullscreenSrc}
+                query={fullscreenQuery}
+                initialPage={fullscreenPage}
+                onNav={setPdfNav}
+              />
             </>
           )}
           {fullscreenType === 'docx' && (
