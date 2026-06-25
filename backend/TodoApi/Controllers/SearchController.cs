@@ -71,7 +71,13 @@ public class SearchController(AppDbContext db) : ControllerBase
                             source = "attachment",
                             text = Snippet(att.ExtractedText!, norm),
                             commentId = att.CommentId,
-                            fileName = FileNameOf(att.Path),
+                            fileName = FileNameOf(att.Path),          // extension chip, e.g. "PDF"
+                            // The original upload name to show as a heading; falls back to the
+                            // on-disk Guid name for attachments uploaded before names were kept.
+                            displayName = att.FileName ?? System.IO.Path.GetFileName(att.Path),
+                            // Served URL of the actual file, so the UI can open it
+                            // directly and jump to the page/place of the match.
+                            attachmentPath = att.Path,
                         });
                 }
             }

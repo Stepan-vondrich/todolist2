@@ -71,6 +71,9 @@ export default function App() {
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [error, setError] = useState<string | null>(null)
   const [openCommentsTodoId, setOpenCommentsTodoId] = useState<number | null>(null)
+  // When a search hit inside an attachment is clicked, this asks CommentsPanel to
+  // open that file's viewer and jump to where `query` matches. Cleared once consumed.
+  const [docJump, setDocJump] = useState<{ path: string; query: string } | null>(null)
   const [commentsByTodo, setCommentsByTodo] = useState<Record<number, Comment[]>>({})
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({})
   const [activeTodoIds, setActiveTodoIds] = useState<Set<number>>(new Set())
@@ -394,6 +397,7 @@ export default function App() {
   }
 
   async function handleOpenComments(id: number) {
+    setDocJump(null) // a plain open shouldn't carry over a stale attachment jump
     setOpenCommentsTodoId(id)
     if (!commentsByTodo[id]) {
       try {
@@ -401,6 +405,21 @@ export default function App() {
         setCommentsByTodo(prev => ({ ...prev, [id]: comments }))
       } catch {
         setCommentsByTodo(prev => ({ ...prev, [id]: [] }))
+      }
+    }
+  }
+
+  // From a search hit inside an attachment: open the todo's comments and tell the
+  // panel which file to open and what term to jump to.
+  async function handleOpenAttachment(todoId: number, attachmentPath: string, query: string) {
+    setDocJump({ path: attachmentPath, query })
+    setOpenCommentsTodoId(todoId)
+    if (!commentsByTodo[todoId]) {
+      try {
+        const comments = await fetchComments(todoId)
+        setCommentsByTodo(prev => ({ ...prev, [todoId]: comments }))
+      } catch {
+        setCommentsByTodo(prev => ({ ...prev, [todoId]: [] }))
       }
     }
   }
@@ -813,6 +832,7 @@ export default function App() {
           onClose={() => setSearchOpen(false)}
           onOpenComments={handleOpenComments}
           onReveal={handleRevealTodo}
+          onOpenAttachment={handleOpenAttachment}
         />
       )}
       {manifestOpen && (
@@ -857,6 +877,9 @@ export default function App() {
           onDeleteComment={handleDeleteComment}
           onEditComment={handleEditComment}
           logRefreshKey={logRefreshKey}
+          onReveal={handleRevealTodo}
+          docJump={docJump}
+          onDocJumpConsumed={() => setDocJump(null)}
         />
       )}
 

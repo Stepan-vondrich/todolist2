@@ -6,6 +6,7 @@ import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { Comment, CommentAttachment, TaskSession, TaskLog } from '../types'
 import { fetchSessions, deleteSession, updateSession } from '../api/taskSessions'
 import { fetchLogs } from '../api/taskLogs'
+import { normalizeForSearch, findMatchIndex } from '../utils/findMatch'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
@@ -409,7 +410,7 @@ async function processFile(raw: File): Promise<PendingItem> {
 
 // --- PDF viewer (canvas-based, no iframe) ---
 
-function PdfViewer({ src }: { src: string }) {
+function PdfViewer({ src, query }: { src: string; query?: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<'loading' | 'done' | 'error'>('loading')
 
@@ -425,6 +426,9 @@ function PdfViewer({ src }: { src: string }) {
     ;(async () => {
       try {
         const pdf = await pdfjsLib.getDocument(src).promise
+        const normQuery = query ? normalizeForSearch(query.trim()) : ''
+        let matchCanvas: HTMLCanvasElement | null = null
+
         for (let i = 1; i <= pdf.numPages; i++) {
           if (cancelled) return
           const page = await pdf.getPage(i)
@@ -437,15 +441,31 @@ function PdfViewer({ src }: { src: string }) {
           const ctx = canvas.getContext('2d')!
           await page.render({ canvasContext: ctx, viewport, canvas }).promise
           if (cancelled) return
+
+          // First page whose text contains the query → remember it to jump to.
+          if (normQuery && !matchCanvas) {
+            const content = await page.getTextContent()
+            const pageText = content.items.map(it => ('str' in it ? it.str : '')).join(' ')
+            if (normalizeForSearch(pageText).includes(normQuery)) matchCanvas = canvas
+          }
         }
         if (!cancelled) setStatus('done')
+
+        // Jump to the matching page once everything is laid out.
+        if (matchCanvas && !cancelled) {
+          requestAnimationFrame(() => {
+            matchCanvas!.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            matchCanvas!.classList.add('pdf-page-match')
+            setTimeout(() => matchCanvas?.classList.remove('pdf-page-match'), 2000)
+          })
+        }
       } catch {
         if (!cancelled) setStatus('error')
       }
     })()
 
     return () => { cancelled = true }
-  }, [src])
+  }, [src, query])
 
   return (
     <div className="pdf-viewer-scroll" onClick={e => e.stopPropagation()}>
@@ -458,9 +478,10 @@ function PdfViewer({ src }: { src: string }) {
 
 // --- DOCX viewer (mammoth → HTML) ---
 
-function DocxViewer({ src }: { src: string }) {
+function DocxViewer({ src, query }: { src: string; query?: string }) {
   const [html, setHtml] = useState<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'done' | 'error'>('loading')
+  const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -479,12 +500,41 @@ function DocxViewer({ src }: { src: string }) {
     return () => { cancelled = true }
   }, [src])
 
+  // After the HTML is in the DOM, find the text node holding the match, wrap it
+  // in a <mark>, and scroll to it. The rendered HTML flows continuously (no pages),
+  // so jumping to the matching text is the docx equivalent of "open at the page".
+  useEffect(() => {
+    if (html === null) return
+    const root = contentRef.current
+    const q = query?.trim()
+    if (!root || !q) return
+
+    requestAnimationFrame(() => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      let node: Node | null
+      while ((node = walker.nextNode())) {
+        const value = node.nodeValue ?? ''
+        const idx = findMatchIndex(value, q)
+        if (idx < 0) continue
+        // Split the text node and wrap the matched run in a <mark>.
+        const after = (node as Text).splitText(idx)
+        after.splitText(q.length)
+        const mark = document.createElement('mark')
+        mark.className = 'viewer-match'
+        mark.textContent = after.nodeValue
+        after.parentNode?.replaceChild(mark, after)
+        mark.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        break
+      }
+    })
+  }, [html, query])
+
   return (
     <div className="docx-viewer-scroll" onClick={e => e.stopPropagation()}>
       {status === 'loading' && <div className="pdf-viewer-loading">⏳ Načítám dokument…</div>}
       {status === 'error'   && <div className="pdf-viewer-loading">❌ Dokument se nepodařilo načíst.</div>}
       {html !== null && (
-        <div className="docx-viewer-content" dangerouslySetInnerHTML={{ __html: html }} />
+        <div ref={contentRef} className="docx-viewer-content" dangerouslySetInnerHTML={{ __html: html }} />
       )}
     </div>
   )
@@ -492,9 +542,10 @@ function DocxViewer({ src }: { src: string }) {
 
 // --- TXT viewer (plain text in a scrollable pre) ---
 
-function TxtViewer({ src }: { src: string }) {
+function TxtViewer({ src, query }: { src: string; query?: string }) {
   const [text, setText] = useState<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'done' | 'error'>('loading')
+  const markRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -512,11 +563,29 @@ function TxtViewer({ src }: { src: string }) {
     return () => { cancelled = true }
   }, [src])
 
+  // Scroll the highlighted match into view once rendered.
+  useEffect(() => {
+    if (text !== null && markRef.current) {
+      requestAnimationFrame(() =>
+        markRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+    }
+  }, [text])
+
+  // Split the text around the first match so we can wrap it in a <mark>.
+  const idx = text !== null && query ? findMatchIndex(text, query.trim()) : -1
+  const content = text === null ? null
+    : idx < 0 ? text
+    : <>
+        {text.slice(0, idx)}
+        <mark ref={markRef} className="viewer-match">{text.slice(idx, idx + query!.trim().length)}</mark>
+        {text.slice(idx + query!.trim().length)}
+      </>
+
   return (
     <div className="docx-viewer-scroll" onClick={e => e.stopPropagation()}>
       {status === 'loading' && <div className="pdf-viewer-loading">⏳ Načítám soubor…</div>}
       {status === 'error'   && <div className="pdf-viewer-loading">❌ Soubor se nepodařilo načíst.</div>}
-      {text !== null && <pre className="txt-viewer-content">{text}</pre>}
+      {text !== null && <pre className="txt-viewer-content">{content}</pre>}
     </div>
   )
 }
@@ -532,9 +601,15 @@ interface Props {
   onDeleteComment?: (commentId: number) => void
   onEditComment?: (commentId: number, text: string) => void
   logRefreshKey?: number
+  // Reveal this todo in the list (expand ancestors, scroll to it, flash it).
+  onReveal?: (id: number) => void
+  // When set (from a search hit), open this attachment's viewer and jump to the
+  // place where `query` matches. Call onDocJumpConsumed once handled.
+  docJump?: { path: string; query: string } | null
+  onDocJumpConsumed?: () => void
 }
 
-export default function CommentsPanel({ todoId, todoTitle, comments, onClose, onAddComment, onDeleteComment, onEditComment, logRefreshKey }: Props) {
+export default function CommentsPanel({ todoId, todoTitle, comments, onClose, onAddComment, onDeleteComment, onEditComment, logRefreshKey, onReveal, docJump, onDocJumpConsumed }: Props) {
   const [tab, setTab] = useState<'comments' | 'sessions' | 'log'>('comments')
   const [sessions, setSessions] = useState<TaskSession[]>([])
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
@@ -601,13 +676,16 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
   const dragCounter = useRef(0)
   const [fullscreenSrc, setFullscreenSrc] = useState<string | null>(null)
   const [fullscreenType, setFullscreenType] = useState<'image' | 'video' | 'pdf' | 'docx' | 'txt'>('image')
+  // Search term to jump to inside a document viewer (empty = no jump).
+  const [fullscreenQuery, setFullscreenQuery] = useState('')
   const pendingBlobUrl = useRef<string | null>(null)
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null)
   const [editDraft, setEditDraft] = useState('')
 
-  function openFullscreen(src: string, type: 'image' | 'video' | 'pdf' | 'docx' | 'txt') {
+  function openFullscreen(src: string, type: 'image' | 'video' | 'pdf' | 'docx' | 'txt', query = '') {
     setFullscreenSrc(src)
     setFullscreenType(type)
+    setFullscreenQuery(query)
   }
 
   function closeFullscreen() {
@@ -616,7 +694,19 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
       pendingBlobUrl.current = null
     }
     setFullscreenSrc(null)
+    setFullscreenQuery('')
   }
+
+  // A search hit inside an attachment asked us to open that file at the match.
+  // Map the file extension to a viewer type and open it with the query.
+  useEffect(() => {
+    if (!docJump) return
+    const ext = (docJump.path.split('.').pop() ?? '').toLowerCase()
+    const viewType = ext === 'pdf' ? 'pdf' : ext === 'docx' ? 'docx' : ext === 'txt' ? 'txt' : null
+    if (viewType) openFullscreen(docJump.path, viewType, docJump.query)
+    onDocJumpConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docJump])
 
   function openPendingFullscreen(item: PendingItem) {
     // Revoke any previous temporary blob URL
@@ -772,7 +862,7 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
                 className="pdf-overlay-newtab" onClick={e => e.stopPropagation()}>
                 ↗ Otevřít v záložce
               </a>
-              <PdfViewer src={fullscreenSrc} />
+              <PdfViewer src={fullscreenSrc} query={fullscreenQuery} />
             </>
           )}
           {fullscreenType === 'docx' && (
@@ -781,7 +871,7 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
                 className="pdf-overlay-newtab" onClick={e => e.stopPropagation()}>
                 ↓ Stáhnout
               </a>
-              <DocxViewer src={fullscreenSrc} />
+              <DocxViewer src={fullscreenSrc} query={fullscreenQuery} />
             </>
           )}
           {fullscreenType === 'txt' && (
@@ -790,7 +880,7 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
                 className="pdf-overlay-newtab" onClick={e => e.stopPropagation()}>
                 ↓ Stáhnout
               </a>
-              <TxtViewer src={fullscreenSrc} />
+              <TxtViewer src={fullscreenSrc} query={fullscreenQuery} />
             </>
           )}
         </div>
@@ -798,7 +888,17 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
 
       <div className="comments-panel">
         <div className="comments-panel-header">
-          <span className="comments-panel-title">{todoTitle}</span>
+          {onReveal ? (
+            <button
+              className="comments-panel-title comments-panel-title--link"
+              title="Zobrazit úkol v seznamu"
+              onClick={() => onReveal(todoId)}
+            >
+              {todoTitle}
+            </button>
+          ) : (
+            <span className="comments-panel-title">{todoTitle}</span>
+          )}
           <button className="comments-panel-close" aria-label="Close" onClick={onClose}>✕</button>
         </div>
 
@@ -990,8 +1090,8 @@ export default function CommentsPanel({ todoId, todoTitle, comments, onClose, on
                               {isPdf ? '📄 Otevřít PDF' : isTxt ? '📄 Otevřít text' : '📝 Otevřít dokument'}
                             </button>
                           ) : null}
-                          <a href={att.path} download className="comment-file-link">
-                            📎 {att.path.split('/').pop()}
+                          <a href={att.path} download={att.fileName ?? undefined} className="comment-file-link">
+                            📎 {att.fileName ?? att.path.split('/').pop()}
                           </a>
                         </>
                       )

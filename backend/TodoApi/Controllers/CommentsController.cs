@@ -97,6 +97,7 @@ public class CommentsController(AppDbContext db) : ControllerBase
             {
                 CommentId = comment.Id,
                 Path = $"/uploads/{fileName}",
+                FileName = System.IO.Path.GetFileName(fileEntry.FileName), // original name, sans any path
                 Type = type,
                 Preview = previewPath,
                 SortOrder = sortOrder++,

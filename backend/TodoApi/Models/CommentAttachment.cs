@@ -5,6 +5,10 @@ public class CommentAttachment
     public int Id { get; set; }
     public int CommentId { get; set; }
     public string Path { get; set; } = string.Empty;
+    // The original upload filename (e.g. "Jednoduše a dokonale.pdf"), shown in the UI.
+    // The on-disk file keeps a Guid name to avoid collisions and unsafe characters;
+    // null for attachments uploaded before this was tracked (fall back to the Guid).
+    public string? FileName { get; set; }
     public string? Type { get; set; }
     public string? Preview { get; set; }
     public int SortOrder { get; set; }

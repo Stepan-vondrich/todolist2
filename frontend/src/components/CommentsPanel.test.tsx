@@ -81,7 +81,7 @@ describe('CommentsPanel', () => {
 
   it('renders an image when the comment has an image attachment', () => {
     const comment = makeComment(1, 'See pic', {
-      attachments: [{ id: 1, commentId: 1, path: 'data:image/png;base64,abc', type: 'image', preview: null, sortOrder: 0 }],
+      attachments: [{ id: 1, commentId: 1, path: 'data:image/png;base64,abc', fileName: null, type: 'image', preview: null, sortOrder: 0 }],
     })
     render(<CommentsPanel todoId={1} todoTitle="My task" comments={[comment]} onClose={noop} onAddComment={noop} />)
     expect(screen.getByRole('img')).toBeInTheDocument()

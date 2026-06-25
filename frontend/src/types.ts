@@ -25,6 +25,7 @@ export interface CommentAttachment {
   id: number
   commentId: number
   path: string
+  fileName: string | null  // original upload name; null for legacy attachments (use path)
   type: 'image' | 'video' | 'file' | null
   preview: string | null
   sortOrder: number

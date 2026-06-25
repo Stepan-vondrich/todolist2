@@ -6,6 +6,9 @@ interface Props {
   onOpenComments: (id: number) => void
   // Expand ancestors / clear filters so the todo is rendered, then scroll + flash it.
   onReveal: (id: number) => void
+  // Open the comments panel for a todo AND jump its viewer to where `query`
+  // matches inside the given attachment file.
+  onOpenAttachment: (todoId: number, attachmentPath: string, query: string) => void
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -19,7 +22,7 @@ function truncate(text: string | null | undefined, max = 220): string {
   return text.length <= max ? text : text.slice(0, max) + '…'
 }
 
-export default function SearchPanel({ onClose, onOpenComments, onReveal }: Props) {
+export default function SearchPanel({ onClose, onOpenComments, onReveal, onOpenAttachment }: Props) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -63,6 +66,18 @@ export default function SearchPanel({ onClose, onOpenComments, onReveal }: Props
     onClose()
     onOpenComments(todoId)
     // Also surface the task itself in the tree, not just its comments panel.
+    onReveal(todoId)
+  }
+
+  function handleAttachmentClick(e: React.MouseEvent, todoId: number, attachmentPath?: string | null) {
+    e.stopPropagation()
+    onClose()
+    if (attachmentPath) {
+      // Open the panel and jump the document viewer to the matching page/place.
+      onOpenAttachment(todoId, attachmentPath, query.trim())
+    } else {
+      onOpenComments(todoId)
+    }
     onReveal(todoId)
   }
 
@@ -135,10 +150,13 @@ export default function SearchPanel({ onClose, onOpenComments, onReveal }: Props
                     <div
                       key={i}
                       className="search-result-comment"
-                      onClick={e => handleCommentClick(e, result.todoId)}
-                      title="Otevřít komentáře s přílohou"
+                      onClick={e => handleAttachmentClick(e, result.todoId, m.attachmentPath)}
+                      title="Otevřít dokument na místě shody"
                     >
                       <span className="search-result-comment-label">📎 {m.fileName || 'příloha'}</span>
+                      {m.displayName && (
+                        <span className="search-result-attachment-name">{m.displayName}</span>
+                      )}
                       <span className="search-result-comment-text">{truncate(m.text)}</span>
                     </div>
                   ) : (

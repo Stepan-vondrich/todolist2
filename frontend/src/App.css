@@ -599,12 +599,21 @@ h1 {
 .search-result-comment {
   display: flex;
   align-items: flex-start;
+  flex-wrap: wrap;
   gap: 6px;
   font-size: 13px;
   color: #4b5563;
   padding: 3px 0 1px;
   cursor: pointer;
 }
+/* Original document name on its own line under the 📎 chip. */
+.search-result-attachment-name {
+  flex-basis: 100%;
+  font-weight: 600;
+  color: #374151;
+  word-break: break-word;
+}
+.search-result-comment:hover .search-result-attachment-name { color: #6366f1; }
 .search-result-comment:hover .search-result-comment-text { color: #6366f1; }
 .search-result-comment-label {
   flex-shrink: 0;
@@ -869,7 +878,15 @@ h1 {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 0 14px 8px;
+  padding: 8px 14px;
+  /* Keep the column headers visible while scrolling the list. The page scrolls on
+     the window, so sticky pins the header to the top of the viewport. Opaque
+     background + bottom border so rows don't show through underneath. */
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #f0f2f5;
+  border-bottom: 1px solid #e5e7eb;
 }
 .todo-header > span:first-child  { width: 20px; flex-shrink: 0; }
 .todo-header > span:nth-child(2) { width: 18px; flex-shrink: 0; }
@@ -1564,6 +1581,19 @@ h1 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Clickable title: reset button chrome, keep it left-aligned, add a link cue. */
+.comments-panel-title--link {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.comments-panel-title--link:hover {
+  color: #6366f1;
+  text-decoration: underline;
+}
 .comments-panel-close {
   background: none;
   border: none;
@@ -1716,6 +1746,22 @@ h1 {
   max-width: 100%;
   box-shadow: 0 2px 8px rgba(0,0,0,0.5);
   display: block;
+}
+/* The PDF page that contains the search match — briefly outlined when jumped to. */
+.pdf-viewer-canvas.pdf-page-match {
+  outline: 3px solid #6366f1;
+  animation: viewer-match-fade 2s ease-out;
+}
+/* Highlighted run inside a txt/docx viewer when opened from a search hit. */
+.viewer-match {
+  background: #fde68a;
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+@keyframes viewer-match-fade {
+  0% { outline-color: #6366f1; }
+  100% { outline-color: rgba(99, 102, 241, 0); }
 }
 .pdf-viewer-loading {
   color: #fff;
