@@ -78,16 +78,19 @@ function OverflowDebug() {
   useEffect(() => {
     const scan = () => {
       const de = document.documentElement
-      const lines = [`vw=${window.innerWidth} docSW=${de.scrollWidth} bodySW=${document.body.scrollWidth}`]
-      const hits: string[] = []
+      const vw = window.innerWidth
+      const lines = [`vw=${vw} docSW=${de.scrollWidth} bodySW=${document.body.scrollWidth}`]
+      // Elements whose RIGHT edge sticks out past the viewport — these push the page wide.
+      const past: { s: string; right: number }[] = []
       document.querySelectorAll<HTMLElement>('body *').forEach(el => {
-        if (el.scrollWidth > el.clientWidth + 3 && el.clientWidth > 0) {
-          const r = el.getBoundingClientRect()
-          const cls = (typeof el.className === 'string' ? el.className : el.tagName).slice(0, 22)
-          hits.push(`${cls} cw${el.clientWidth} sw${el.scrollWidth} y${Math.round(r.top)}–${Math.round(r.bottom)}`)
+        const r = el.getBoundingClientRect()
+        const cls = (typeof el.className === 'string' ? el.className : el.tagName).slice(0, 20)
+        if (r.right > vw + 1 && r.width > 0) {
+          past.push({ s: `→ ${cls} right${Math.round(r.right)} w${Math.round(r.width)} y${Math.round(r.top)}–${Math.round(r.bottom)}`, right: r.right })
         }
       })
-      setInfo([...lines, ...hits.slice(0, 12)].join('\n'))
+      past.sort((a, b) => b.right - a.right)
+      setInfo([...lines, `past-right (${past.length}):`, ...past.slice(0, 10).map(p => p.s)].join('\n'))
     }
     scan()
     const t = setInterval(scan, 1000)
