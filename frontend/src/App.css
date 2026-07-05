@@ -924,46 +924,27 @@ h1 {
    text. Instead, anchor the table to a fixed minimum width and let it scroll
    horizontally — columns stay aligned and every cell's text stays visible. */
 @media (max-width: 1000px) {
-  /* Make the app fill the viewport and let the table take the leftover height, so the
-     table's horizontal scrollbar sits at the BOTTOM of the screen instead of floating
-     mid-page under a short (few-row) table. Padding (not margin) + height:100dvh keeps
-     the total exactly one viewport tall, so nothing scrolls at the page level. */
-  /* Stop the whole page from scrolling sideways. On iOS something in the top area (the
-     header/add-form region) let the body scroll horizontally ~47px — swiping there
-     showed a stray page scrollbar. clip removes that scroll entirely; the table keeps
-     its own internal horizontal scroll. */
+  /* The page scrolls normally (the header/add-form area scrolls up out of view and the
+     task list gets the full length). Stop only SIDEWAYS page scroll: on iOS the body
+     could rubber-band ~47px horizontally, showing a stray scrollbar. clip removes that
+     while the table keeps its own internal horizontal scroll. */
   html, body {
     overflow-x: clip;
   }
   .app {
-    display: flex;
-    flex-direction: column;
-    margin: 0;
-    padding: 48px 24px 0;
-    height: 100dvh;
     overflow-x: clip;
   }
   .todo-table {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: auto;
+    overflow-x: auto;
     /* Pin a definite width to the parent. iOS Safari otherwise sizes an overflow:auto
-       block to its wide (min-width) content instead of the parent, so the table spilled
-       ~47px past .app and gave the whole page a stray horizontal scrollbar. */
+       block to its wide (min-width) content instead of the parent, spilling past .app. */
     width: 100%;
     max-width: 100%;
-    /* Hide the scrollbar. iOS Safari drew it in the wrong place (mid-page under a short
-       table, and as a stray line over the filter row after overlays closed). The table
-       still pans by touch/swipe; the cut-off columns in the header hint it scrolls. */
+    /* Hide the scrollbar — iOS drew it in the wrong place. The table still pans by
+       touch/swipe; the cut-off columns in the header hint it scrolls. */
     scrollbar-width: none;
   }
   .todo-table::-webkit-scrollbar { display: none; }
-  /* The header sticks to the table's scroll box here. A sticky element that must also
-     translate horizontally leaves a stray scrollbar/line artifact on iOS Safari after
-     overlays open/close, so drop sticky on mobile — it just scrolls with the rows. */
-  .todo-header {
-    position: static;
-  }
   /* The Název column is sized in JS (--name-region = max over visible rows of
      indent + text width) so no title is squeezed. The table's min width grows with it
      (~780px covers the fixed columns + gaps), and the table scrolls horizontally.
