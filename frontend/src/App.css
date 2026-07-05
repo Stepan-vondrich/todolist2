@@ -1807,13 +1807,17 @@ h1 {
 .pdf-viewer-scroll {
   width: 92vw;
   height: 94vh;
-  overflow-y: auto;
+  /* Pages render at full scale (wider than a phone), so allow panning on BOTH axes.
+     align-items: flex-start keeps the left edge reachable — with `center`, a page wider
+     than the viewport overflows equally on both sides and the left part can't be
+     scrolled to. */
+  overflow: auto;
   border-radius: 8px;
   background: #525659;
   box-shadow: 0 8px 40px rgba(0,0,0,0.4);
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   padding: 16px 0;
 }
 .pdf-viewer-pages {
@@ -1821,7 +1825,11 @@ h1 {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  width: 100%;
+  /* Size to the widest page so the scroll container can pan to its full width; fill the
+     viewport when pages are narrower so they stay centered. */
+  width: max-content;
+  min-width: 100%;
+  padding: 0 16px;
 }
 /* Each page: canvas with a position-aligned, selectable text layer stacked on top. */
 .pdf-page {
