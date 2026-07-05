@@ -647,11 +647,25 @@ function PdfViewer({ src, query, initialPage, onNav }: {
         if (!cancelled) {
           setStatus('error')
           const err = e as Error
+          const g = globalThis as Record<string, unknown>
+          const miss: string[] = []
+          const check = (name: string, ok: boolean) => { if (!ok) miss.push(name) }
+          check('Promise.withResolvers', typeof (Promise as unknown as Record<string, unknown>).withResolvers === 'function')
+          const arrProto = Array.prototype as unknown as Record<string, unknown>
+          check('Array.at', typeof arrProto.at === 'function')
+          check('Array.findLast', typeof arrProto.findLast === 'function')
+          check('Array.fromAsync', typeof (Array as unknown as Record<string, unknown>).fromAsync === 'function')
+          check('Object.hasOwn', typeof (Object as unknown as Record<string, unknown>).hasOwn === 'function')
+          check('Object.groupBy', typeof (Object as unknown as Record<string, unknown>).groupBy === 'function')
+          check('structuredClone', typeof g.structuredClone === 'function')
+          check('ReadableStream.asyncIterator',
+            typeof (ReadableStream?.prototype as unknown as Record<symbol, unknown>)?.[Symbol.asyncIterator] === 'function')
           const info = [
             `${err?.name || 'Error'}: ${err?.message || String(e)}`,
             `pdfjs ${pdfjsLib.version}`,
-            `worker ${String(pdfjsWorkerUrl).slice(0, 80)}`,
-            `Worker=${typeof Worker !== 'undefined'} moduleWorker=${supportsModuleWorker()}`,
+            `missing: ${miss.length ? miss.join(', ') : 'none of the probed'}`,
+            `moduleWorker=${supportsModuleWorker()}`,
+            `UA: ${navigator.userAgent}`,
             (err?.stack || '').split('\n').slice(1, 3).join(' | '),
           ].filter(Boolean).join('\n')
           console.error('[PdfViewer] load failed:', e, '\n', info)
