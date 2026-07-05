@@ -1,4 +1,5 @@
 import React, { Fragment, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { TodoItem as Todo, FilterState } from '../types'
 import type { DropPosition } from '../api/todos'
 import TodoItem from './TodoItem'
@@ -543,7 +544,9 @@ export default function TodoList({ todos, onUpdate, onDelete, onAdd, onOpenComme
           onUpdate({ ...movingTodo, parentId: newParentId })
           closeMovePicker()
         }
-        return (
+        // Render into <body> so no ancestor stacking context / overflow / transform can
+        // clip or mis-layer the picker (fixes it vanishing on the 2nd open).
+        return createPortal(
           <div className="move-overlay" onClick={closeMovePicker}>
             <div className="move-picker" onClick={e => e.stopPropagation()}>
               <div className="move-picker-header">
@@ -581,7 +584,8 @@ export default function TodoList({ todos, onUpdate, onDelete, onAdd, onOpenComme
                 ))}
               </ul>
             </div>
-          </div>
+          </div>,
+          document.body
         )
       })()}
     </div>
