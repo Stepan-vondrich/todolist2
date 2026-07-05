@@ -1740,20 +1740,29 @@ h1 {
 .comment-image--clickable {
   cursor: zoom-in;
 }
+/* Solid dark pill on top of the document (matches the ✕ disc). Without z-index the
+   PDF/doc viewer rendered over it, so it sat behind the page and was only clickable
+   where it happened to overlap the document. */
 .pdf-overlay-newtab {
   position: absolute;
-  top: 16px;
-  right: 60px;
-  background: rgba(255,255,255,0.15);
+  top: calc(16px + env(safe-area-inset-top, 0px));
+  right: 72px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 14px;
+  background: rgba(0,0,0,0.6);
+  border: 1.5px solid rgba(255,255,255,0.85);
   color: #fff;
   font-size: 0.8rem;
-  padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: 20px;
   text-decoration: none;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
   transition: background 0.15s;
   white-space: nowrap;
 }
-.pdf-overlay-newtab:hover { background: rgba(255,255,255,0.3); color: #fff; }
+.pdf-overlay-newtab:hover { background: rgba(0,0,0,0.85); color: #fff; }
 
 /* Match navigation bar (N / M + arrows) shown top-center over the open PDF. */
 .pdf-match-nav {
