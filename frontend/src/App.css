@@ -926,7 +926,11 @@ h1 {
 @media (max-width: 1000px) {
   .todo-table {
     overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    /* Pin a definite width to the parent. iOS Safari otherwise sizes an overflow:auto
+       block to its wide (min-width) content instead of the parent, so the table spilled
+       ~47px past .app and gave the whole page a stray horizontal scrollbar. */
+    width: 100%;
+    max-width: 100%;
   }
   /* The Název column is sized in JS (--name-region = max over visible rows of
      indent + text width) so no title is squeezed. The table's min width grows with it
