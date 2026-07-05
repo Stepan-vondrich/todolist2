@@ -14,3 +14,38 @@ if (typeof (Promise as unknown as { withResolvers?: unknown }).withResolvers !==
     return { promise, resolve, reject }
   }
 }
+
+// ReadableStream async iteration — `for await (const chunk of stream)`. pdf.js 5.x uses
+// it to read the fetched PDF; Safari (incl. current iOS 18/26) still ships no
+// ReadableStream.prototype[Symbol.asyncIterator], so it threw "undefined is not a
+// function" and the PDF never loaded. This is the standard spec-shaped shim.
+{
+  const proto = (typeof ReadableStream !== 'undefined' ? ReadableStream.prototype : undefined) as
+    | (ReadableStream & Record<PropertyKey, unknown>)
+    | undefined
+  if (proto && typeof proto[Symbol.asyncIterator] !== 'function') {
+    function values(this: ReadableStream<unknown>, { preventCancel = false }: { preventCancel?: boolean } = {}) {
+      const reader = this.getReader()
+      return {
+        next() {
+          return reader.read().then(
+            result => { if (result.done) reader.releaseLock(); return result },
+            reason => { reader.releaseLock(); throw reason },
+          )
+        },
+        return(value?: unknown) {
+          if (!preventCancel) {
+            const cancelPromise = reader.cancel(value)
+            reader.releaseLock()
+            return cancelPromise.then(() => ({ done: true, value }))
+          }
+          reader.releaseLock()
+          return Promise.resolve({ done: true, value })
+        },
+        [Symbol.asyncIterator]() { return this },
+      }
+    }
+    proto.values = values
+    proto[Symbol.asyncIterator] = values
+  }
+}
