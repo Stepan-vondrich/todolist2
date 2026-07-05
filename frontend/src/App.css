@@ -1400,14 +1400,23 @@ h1 {
   z-index: 200;
 }
 
-/* On phones/tablets the 33vw side panel is too narrow and 100vh hides the
-   compose box + Send button behind the mobile browser's bottom toolbar.
-   Make it a full-screen panel using the dynamic viewport height (dvh) so the
-   Send button stays reachable. */
+/* On phones/tablets the 33vw side panel is too narrow. A right-pinned full-width
+   panel pushes its close ✕ off-screen on iOS (the layout viewport is wider than the
+   visible area), so instead make it a near-full-screen CENTERED card — the same trick
+   the search/move panels use to keep their ✕ reachable. dvh keeps the Send button
+   above the mobile browser's bottom toolbar. */
 @media (max-width: 1000px) {
   .comments-panel {
-    width: 100vw;
-    height: 100dvh;
+    top: 12px;
+    bottom: 12px;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: min(560px, calc(100vw - 24px));
+    height: auto;
+    max-height: none;
+    border-left: none;
+    border-radius: 10px;
   }
 }
 
