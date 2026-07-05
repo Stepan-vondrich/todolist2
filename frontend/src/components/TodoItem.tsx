@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type CSSProperties } from 'react'
 import type { TodoItem as Todo } from '../types'
 import type { DropPosition } from '../api/todos'
 import { isOverdue as checkOverdue } from '../utils/isOverdue'
@@ -173,6 +173,7 @@ export default function TodoItem({ todo, onUpdate, onDelete, onSubtaskCreate, on
   return (
     <li
       className={`todo-item${todo.isCompleted ? ' completed' : ''}${depth > 0 ? ' subtask-item' : ''}${isDragging ? ' is-dragging' : ''}${dropClass}`}
+      style={{ ['--row-indent']: `${depth * 20}px` } as CSSProperties}
       data-todo-id={todo.id}
       draggable={draggable && handleHeld}
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.() }}

@@ -4,6 +4,22 @@ import type { TodoItem as Todo, FilterState } from '../types'
 import type { DropPosition } from '../api/todos'
 import TodoItem from './TodoItem'
 
+// One indent level, in px. Must match the spacer width in TodoItem and the
+// `--row-indent` set on each row below, so the Název column math stays consistent.
+const INDENT_STEP = 20
+
+// Measures rendered text width using the .todo-title font, so the Název column can be
+// sized to fit the longest (and deepest-indented) title instead of squeezing it onto
+// two/three wrapped lines. Falls back to a rough estimate where canvas is unavailable.
+let _measureCtx: CanvasRenderingContext2D | null = null
+function measureTitleWidth(text: string): number {
+  if (!_measureCtx) {
+    _measureCtx = document.createElement('canvas').getContext('2d')
+    if (_measureCtx) _measureCtx.font = '16px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+  }
+  return _measureCtx ? _measureCtx.measureText(text).width : text.length * 8
+}
+
 const STATUS_OPTIONS = [
   { value: '',           label: '(Blank)' },
   { value: 'in-process', label: 'In Process' },
@@ -244,6 +260,28 @@ export default function TodoList({ todos, onUpdate, onDelete, onAdd, onOpenComme
     return ids
   }, [todos, filters, rootIdOf, activityMatchIds])
 
+  // Width the Název column needs so no title is squeezed: the max over every visible
+  // row of (indent + text width). Floored to the header's natural width and capped so a
+  // single very long title can't blow up the horizontal scroll. Fed to CSS as
+  // --name-region; each row's title reserves (name-region - its own indent), so
+  // spacer + title is constant across rows and the right-hand columns stay aligned.
+  const nameColWidth = useMemo(() => {
+    let maxW = 0
+    const walk = (todo: Todo, depth: number) => {
+      const hidden = visibleIds !== null && !visibleIds.has(todo.id)
+      if (hidden) {
+        subtasksOf(todo.id).forEach(c => walk(c, depth + 1))
+        return
+      }
+      const w = depth * INDENT_STEP + measureTitleWidth(todo.title)
+      if (w > maxW) maxW = w
+      if (!collapsed.has(todo.id)) subtasksOf(todo.id).forEach(c => walk(c, depth + 1))
+    }
+    rootTodos.forEach(t => walk(t, 0))
+    return Math.min(640, Math.max(240, Math.ceil(maxW) + 24))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todos, collapsed, visibleIds])
+
   if (rootTodos.length === 0) {
     return <p className="empty">No todos yet. Add one above!</p>
   }
@@ -338,7 +376,7 @@ export default function TodoList({ todos, onUpdate, onDelete, onAdd, onOpenComme
         {!isCollapsed && children.map(child => renderTodo(child, depth + 1, children))}
         {!isCollapsed && pendingSubtaskFor === todo.id && (
           <li className="todo-item subtask-item subtask-new">
-            <span style={{ width: (depth + 1) * 36, flexShrink: 0 }} />
+            <span style={{ width: (depth + 1) * INDENT_STEP, flexShrink: 0 }} />
             <span className="collapse-placeholder" />
             <span className="subtask-indent" />
             <input
@@ -376,7 +414,7 @@ export default function TodoList({ todos, onUpdate, onDelete, onAdd, onOpenComme
   }
 
   return (
-    <div className="todo-table" onClick={closeDropdowns}>
+    <div className="todo-table" onClick={closeDropdowns} style={{ ['--name-region']: `${nameColWidth}px` } as React.CSSProperties}>
       <div className="todo-header">
         <span className="collapse-placeholder" />
         <span />

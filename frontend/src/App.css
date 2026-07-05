@@ -928,9 +928,21 @@ h1 {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
+  /* The Název column is sized in JS (--name-region = max over visible rows of
+     indent + text width) so no title is squeezed. The table's min width grows with it
+     (~780px covers the fixed columns + gaps), and the table scrolls horizontally.
+     Each title reserves (name-region - its own indent) and the header's Název cell
+     reserves the full region, so spacer + title = region on every row and the
+     right-hand columns stay aligned with the header. */
   .todo-header,
   .todo-item {
-    min-width: 1000px;
+    min-width: calc(var(--name-region, 240px) + 780px);
+  }
+  .todo-header > span:nth-child(3) {
+    min-width: var(--name-region, 240px);
+  }
+  .todo-title {
+    min-width: calc(var(--name-region, 240px) - var(--row-indent, 0px));
   }
   /* Add form: stack the title on its own row and let the date/status/button
      wrap to a second row, so the form fits a phone instead of overflowing. */
