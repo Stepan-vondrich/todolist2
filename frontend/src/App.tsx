@@ -67,6 +67,42 @@ function parseBookmarkArrays(b: FilterBookmark) {
 // zůstávají v kódu a fungují. Přepni na true pro zobrazení tlačítek 🧭 Teď / 📄 Manifest.
 const SHOW_PLANNER = false
 
+// DEV-only: which element actually scrolls horizontally when you swipe the top area?
+// Small, top-left, click-through panel. Reports page scroll + any element whose
+// scrollLeft went above 0 (the real culprit behind the stray horizontal scrollbar).
+const SCROLL_DEBUG = typeof location !== 'undefined' && location.hostname.includes('todolist-dev')
+
+function ScrollDebug() {
+  const [info, setInfo] = useState('')
+  useEffect(() => {
+    const seen = new Map<string, number>()
+    const render = () => {
+      const de = document.documentElement
+      const lines = [`vw${window.innerWidth} docSW${de.scrollWidth} pageX${Math.round(window.scrollX)} htmlSL${de.scrollLeft} bodySL${document.body.scrollLeft}`]
+      for (const [k, v] of seen) lines.push(`${k}: sL${v}`)
+      setInfo(lines.join('\n'))
+    }
+    const onScroll = (e: Event) => {
+      const t = e.target as HTMLElement | Document
+      const el = (t === document ? document.scrollingElement : t) as HTMLElement | null
+      if (el && el.scrollLeft > 0) {
+        const cls = (typeof el.className === 'string' && el.className ? el.className : el.tagName || 'doc').slice(0, 22)
+        seen.set(cls, Math.round(el.scrollLeft))
+      }
+      render()
+    }
+    render()
+    document.addEventListener('scroll', onScroll, true)
+    const t = setInterval(render, 500)
+    return () => { document.removeEventListener('scroll', onScroll, true); clearInterval(t) }
+  }, [])
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, zIndex: 99999, background: 'rgba(0,0,0,0.8)',
+      color: '#4ade80', font: '10px/1.3 monospace', whiteSpace: 'pre-wrap', padding: 6,
+      maxWidth: '65vw', pointerEvents: 'none' }}>{info}</div>
+  )
+}
+
 export default function App() {
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -561,6 +597,7 @@ export default function App() {
 
   return (
     <div className={`app${openCommentsTodoId !== null ? ' panel-open' : ''}`}>
+      {SCROLL_DEBUG && <ScrollDebug />}
       <div className="app-header">
         <h1>Todo List</h1>
         <div className="backup-btns">

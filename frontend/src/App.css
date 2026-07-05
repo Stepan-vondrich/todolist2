@@ -928,12 +928,20 @@ h1 {
      table's horizontal scrollbar sits at the BOTTOM of the screen instead of floating
      mid-page under a short (few-row) table. Padding (not margin) + height:100dvh keeps
      the total exactly one viewport tall, so nothing scrolls at the page level. */
+  /* Stop the whole page from scrolling sideways. On iOS something in the top area (the
+     header/add-form region) let the body scroll horizontally ~47px — swiping there
+     showed a stray page scrollbar. clip removes that scroll entirely; the table keeps
+     its own internal horizontal scroll. */
+  html, body {
+    overflow-x: clip;
+  }
   .app {
     display: flex;
     flex-direction: column;
     margin: 0;
     padding: 48px 24px 0;
     height: 100dvh;
+    overflow-x: clip;
   }
   .todo-table {
     flex: 1 1 auto;
