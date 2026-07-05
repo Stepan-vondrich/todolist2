@@ -944,7 +944,12 @@ h1 {
        ~47px past .app and gave the whole page a stray horizontal scrollbar. */
     width: 100%;
     max-width: 100%;
+    /* Hide the scrollbar. iOS Safari drew it in the wrong place (mid-page under a short
+       table, and as a stray line over the filter row after overlays closed). The table
+       still pans by touch/swipe; the cut-off columns in the header hint it scrolls. */
+    scrollbar-width: none;
   }
+  .todo-table::-webkit-scrollbar { display: none; }
   /* The header sticks to the table's scroll box here. A sticky element that must also
      translate horizontally leaves a stray scrollbar/line artifact on iOS Safari after
      overlays open/close, so drop sticky on mobile — it just scrolls with the rows. */
