@@ -180,7 +180,7 @@ export default function TodoItem({ todo, onUpdate, onDelete, onSubtaskCreate, on
       onDragOver={onDragOverRow}
       onDrop={onDropRow}
     >
-      {depth > 0 && <span style={{ width: depth * 36, flexShrink: 0 }} />}
+      {depth > 0 && <span style={{ width: depth * 20, flexShrink: 0 }} />}
       {draggable && (
         <span
           className="drag-handle"

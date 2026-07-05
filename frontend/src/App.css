@@ -930,7 +930,7 @@ h1 {
   }
   .todo-header,
   .todo-item {
-    min-width: 960px;
+    min-width: 1000px;
   }
   /* Add form: stack the title on its own row and let the date/status/button
      wrap to a second row, so the form fits a phone instead of overflowing. */
@@ -1169,7 +1169,7 @@ h1 {
   cursor: pointer;
   word-break: break-word;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
