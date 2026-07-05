@@ -1949,21 +1949,30 @@ h1 {
   max-height: 100%;
   outline: none;
 }
+/* Solid dark disc with a light rim + shadow so the ✕ stays visible over any image —
+   the old faint translucent-white button vanished on light photos (marble, paper…). */
 .video-overlay-close {
   position: absolute;
-  top: 16px;
+  top: calc(16px + env(safe-area-inset-top, 0px));
   right: 20px;
-  background: rgba(255,255,255,0.15);
-  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: rgba(0,0,0,0.6);
+  border: 1.5px solid rgba(255,255,255,0.85);
   color: #fff;
-  font-size: 1.2rem;
+  font-size: 1.3rem;
   cursor: pointer;
-  padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 50%;
   line-height: 1;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
   transition: background 0.15s;
+  z-index: 10;
 }
-.video-overlay-close:hover { background: rgba(255,255,255,0.3); }
+.video-overlay-close:hover { background: rgba(0,0,0,0.85); }
 
 .comment-file-link {
   font-size: 0.85rem;
