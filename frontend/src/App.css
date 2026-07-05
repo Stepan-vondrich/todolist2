@@ -924,8 +924,21 @@ h1 {
    text. Instead, anchor the table to a fixed minimum width and let it scroll
    horizontally — columns stay aligned and every cell's text stays visible. */
 @media (max-width: 1000px) {
+  /* Make the app fill the viewport and let the table take the leftover height, so the
+     table's horizontal scrollbar sits at the BOTTOM of the screen instead of floating
+     mid-page under a short (few-row) table. Padding (not margin) + height:100dvh keeps
+     the total exactly one viewport tall, so nothing scrolls at the page level. */
+  .app {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 48px 24px 0;
+    height: 100dvh;
+  }
   .todo-table {
-    overflow-x: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
     /* Pin a definite width to the parent. iOS Safari otherwise sizes an overflow:auto
        block to its wide (min-width) content instead of the parent, so the table spilled
        ~47px past .app and gave the whole page a stray horizontal scrollbar. */

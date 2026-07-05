@@ -67,43 +67,6 @@ function parseBookmarkArrays(b: FilterBookmark) {
 // zůstávají v kódu a fungují. Přepni na true pro zobrazení tlačítek 🧭 Teď / 📄 Manifest.
 const SHOW_PLANNER = false
 
-// DEV-only (todolist-dev host): a stray horizontal scrollbar shows up on iPad as a line
-// across the add form. We can't inspect iOS Safari remotely, so list every element that
-// overflows horizontally with its vertical range — the one whose bottom sits at the line
-// is the culprit.
-const OVERFLOW_DEBUG = typeof location !== 'undefined' && location.hostname.includes('todolist-dev')
-
-function OverflowDebug() {
-  const [info, setInfo] = useState('')
-  useEffect(() => {
-    const scan = () => {
-      const de = document.documentElement
-      const vw = window.innerWidth
-      const lines = [`vw=${vw} docSW=${de.scrollWidth} bodySW=${document.body.scrollWidth}`]
-      // Elements whose RIGHT edge sticks out past the viewport — these push the page wide.
-      const past: { s: string; right: number }[] = []
-      document.querySelectorAll<HTMLElement>('body *').forEach(el => {
-        const r = el.getBoundingClientRect()
-        const cls = (typeof el.className === 'string' ? el.className : el.tagName).slice(0, 20)
-        if (r.right > vw + 1 && r.width > 0) {
-          past.push({ s: `→ ${cls} right${Math.round(r.right)} w${Math.round(r.width)} y${Math.round(r.top)}–${Math.round(r.bottom)}`, right: r.right })
-        }
-      })
-      past.sort((a, b) => b.right - a.right)
-      setInfo([...lines, `past-right (${past.length}):`, ...past.slice(0, 10).map(p => p.s)].join('\n'))
-    }
-    scan()
-    const t = setInterval(scan, 1000)
-    window.addEventListener('resize', scan)
-    return () => { clearInterval(t); window.removeEventListener('resize', scan) }
-  }, [])
-  return (
-    <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 99999,
-      background: 'rgba(0,0,0,0.85)', color: '#4ade80', font: '11px/1.35 monospace',
-      whiteSpace: 'pre-wrap', padding: 8, maxHeight: '45vh', overflow: 'auto' }}>{info}</div>
-  )
-}
-
 export default function App() {
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -598,7 +561,6 @@ export default function App() {
 
   return (
     <div className={`app${openCommentsTodoId !== null ? ' panel-open' : ''}`}>
-      {OVERFLOW_DEBUG && <OverflowDebug />}
       <div className="app-header">
         <h1>Todo List</h1>
         <div className="backup-btns">
