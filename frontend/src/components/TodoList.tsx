@@ -248,6 +248,13 @@ export default function TodoList({ todos, onUpdate, onDelete, onAdd, onOpenComme
   }
 
   function openSubtask(id: number) {
+    // Expand the task first — a collapsed task hides both the input row and the
+    // new subtask, so adding one to a collapsed task would appear to do nothing.
+    if (collapsed.has(id)) {
+      const next = new Set(collapsed)
+      next.delete(id)
+      onCollapsedChange(next)
+    }
     setPendingSubtaskFor(id)
     setSubtaskDraft('')
     setSubtaskDate('')
