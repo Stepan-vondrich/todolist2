@@ -1311,14 +1311,20 @@ h1 {
    the top (next to the form) and size it to the screen WITH small side margins so the
    target names are never clipped. */
 @media (max-width: 1000px) {
-  .move-overlay {
-    align-items: flex-start;
-  }
+  /* Pin the picker to the viewport with EXPLICIT offsets — not `inset` and not `vw`,
+     both of which misbehave on iOS Safari (layout viewport wider than visual), leaving
+     the picker off-screen / clipped / crammed at the top. Small margins = modal look. */
   .move-picker {
-    width: 94vw;
-    max-width: 94vw;
-    margin-top: 8px;
-    max-height: 90vh;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: auto;
+    max-width: none;
+    height: auto;
+    max-height: none;
+    margin: 0;
   }
 }
 

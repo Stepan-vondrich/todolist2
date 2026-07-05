@@ -79,14 +79,25 @@ function MovePickerDebug() {
       if (!p) { setInfo(ov ? 'overlay ANO, .move-picker NE' : 'picker NENÍ v DOM (klikni ⇄)'); return }
       const r = p.getBoundingClientRect()
       const cs = getComputedStyle(p)
+      const or = ov!.getBoundingClientRect()
+      let anc: HTMLElement | null = ov!.parentElement
+      let culprit = 'none'
+      while (anc) {
+        const s = getComputedStyle(anc)
+        if (s.transform !== 'none' || s.filter !== 'none' || s.perspective !== 'none') {
+          culprit = (anc.className || anc.tagName).toString().slice(0, 22); break
+        }
+        anc = anc.parentElement
+      }
       const items = document.querySelectorAll('.move-picker-item')
       const it0 = items[0] as HTMLElement | undefined
       const ir = it0?.getBoundingClientRect()
       const ics = it0 ? getComputedStyle(it0) : null
       setInfo(
-        `picker @ ${Math.round(r.left)},${Math.round(r.top)}  ${Math.round(r.width)}x${Math.round(r.height)}\n` +
-        `disp:${cs.display} vis:${cs.visibility} opac:${cs.opacity} pos:${cs.position}\n` +
-        `z:${cs.zIndex} bg:${cs.backgroundColor}\n` +
+        `picker @ ${Math.round(r.left)},${Math.round(r.top)}  ${Math.round(r.width)}x${Math.round(r.height)} pos:${cs.position}\n` +
+        `overlay @ ${Math.round(or.left)},${Math.round(or.top)}  ${Math.round(or.width)}x${Math.round(or.height)}\n` +
+        `fixed-culprit(ancestor transform): ${culprit}\n` +
+        `disp:${cs.display} vis:${cs.visibility} opac:${cs.opacity}\n` +
         `items:${items.length}  vw:${window.innerWidth} vh:${window.innerHeight}\n` +
         (it0 && ir && ics
           ? `it0 "${it0.textContent?.trim().slice(0, 16)}" @${Math.round(ir.left)},${Math.round(ir.top)} ${Math.round(ir.width)}x${Math.round(ir.height)}\n color:${ics.color} fill:${ics.getPropertyValue('-webkit-text-fill-color')}`
