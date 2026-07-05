@@ -67,6 +67,46 @@ function parseBookmarkArrays(b: FilterBookmark) {
 // zůstávají v kódu a fungují. Přepni na true pro zobrazení tlačítek 🧭 Teď / 📄 Manifest.
 const SHOW_PLANNER = false
 
+// DEV-only on-screen debug for the move picker (shown only on the dev URL).
+const PICKER_DEBUG = typeof location !== 'undefined' && location.hostname.includes('todolist-dev')
+
+function MovePickerDebug() {
+  const [info, setInfo] = useState('(otevři ⇄ Přesunout)')
+  useEffect(() => {
+    const id = setInterval(() => {
+      const p = document.querySelector('.move-picker') as HTMLElement | null
+      const ov = document.querySelector('.move-overlay') as HTMLElement | null
+      if (!p) { setInfo(ov ? 'overlay ANO, .move-picker NE' : 'picker NENÍ v DOM (klikni ⇄)'); return }
+      const r = p.getBoundingClientRect()
+      const cs = getComputedStyle(p)
+      const items = document.querySelectorAll('.move-picker-item')
+      const it0 = items[0] as HTMLElement | undefined
+      const ir = it0?.getBoundingClientRect()
+      const ics = it0 ? getComputedStyle(it0) : null
+      setInfo(
+        `picker @ ${Math.round(r.left)},${Math.round(r.top)}  ${Math.round(r.width)}x${Math.round(r.height)}\n` +
+        `disp:${cs.display} vis:${cs.visibility} opac:${cs.opacity} pos:${cs.position}\n` +
+        `z:${cs.zIndex} bg:${cs.backgroundColor}\n` +
+        `items:${items.length}  vw:${window.innerWidth} vh:${window.innerHeight}\n` +
+        (it0 && ir && ics
+          ? `it0 "${it0.textContent?.trim().slice(0, 16)}" @${Math.round(ir.left)},${Math.round(ir.top)} ${Math.round(ir.width)}x${Math.round(ir.height)}\n color:${ics.color} fill:${ics.getPropertyValue('-webkit-text-fill-color')}`
+          : 'it0: —')
+      )
+    }, 400)
+    return () => clearInterval(id)
+  }, [])
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100000,
+      background: '#111', color: '#0f0', font: '11px monospace',
+      padding: '6px 8px', whiteSpace: 'pre-wrap', opacity: 0.95,
+      borderBottom: '1px solid #0f0', pointerEvents: 'none',
+    }}>
+      {'DEBUG move-picker\n' + info}
+    </div>
+  )
+}
+
 export default function App() {
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -561,6 +601,7 @@ export default function App() {
 
   return (
     <div className={`app${openCommentsTodoId !== null ? ' panel-open' : ''}`}>
+      {PICKER_DEBUG && <MovePickerDebug />}
       <div className="app-header">
         <h1>Todo List</h1>
         <div className="backup-btns">
