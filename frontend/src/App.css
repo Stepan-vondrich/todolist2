@@ -906,7 +906,9 @@ h1 {
 @media (max-width: 1000px) {
   .todo-table {
     overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    /* NOTE: no -webkit-overflow-scrolling: touch — on iOS Safari it puts the table on
+       its own compositing layer, which stops inputs elsewhere on the page (the add-task
+       field) from repainting while typing. Momentum scrolling is native on modern iOS. */
   }
   .todo-header,
   .todo-item {
