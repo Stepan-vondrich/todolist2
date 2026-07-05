@@ -7,14 +7,18 @@ body {
   min-height: 100vh;
 }
 
-/* iOS Safari in dark mode defaults form-control text, fill and caret to WHITE. Our
-   fields sit on white backgrounds, so typed text was invisible (white on white). Pin a
-   dark text color; -webkit-text-fill-color: currentColor beats the UA white and follows
-   `color`, so inputs that set their own color still render correctly. */
+/* iOS Safari in dark mode defaults form-control text, fill and caret to WHITE and the
+   control background to BLACK. Our fields sit on light UI, so typed text was invisible
+   (white on white) and bg-less inputs like .edit-input rendered dark-on-black. Pin a
+   dark text color and a white background fallback; -webkit-text-fill-color: currentColor
+   beats the UA white and follows `color`. These are element-level rules (lowest
+   specificity), so any input/select that sets its own color/background — e.g. the
+   coloured .status-* selects — still wins and renders correctly. */
 input, textarea, select {
   color: #1f2937;
   -webkit-text-fill-color: currentColor;
   caret-color: #6366f1;
+  background-color: #fff;
 }
 
 .app {
