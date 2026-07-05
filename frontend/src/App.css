@@ -1,5 +1,11 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* The whole app is designed light-only. Declaring the colour scheme makes iOS Safari
+   (and any UA) render form controls, scrollbars and default backgrounds/text in LIGHT
+   mode even when the device is in dark mode — this is the root fix that stops dark-mode
+   defaults (black input backgrounds, white text) from breaking any panel or control. */
+:root { color-scheme: light; }
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #f0f2f5;
