@@ -1226,21 +1226,23 @@ h1 {
 .order-btn:hover:not(:disabled) { color: #6366f1; }
 .order-btn:disabled { opacity: 0.2; cursor: default; }
 
-/* Move picker overlay */
+/* Move picker overlay — same layout as the global search panel so it looks consistent
+   and, importantly, sizes reliably on iOS (min(px, calc(100vw - margins)) instead of vw). */
 .move-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.35);
   z-index: 200;
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: flex-start;
+  padding-top: 80px;
 }
 .move-picker {
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
-  width: 420px;
+  border-radius: 10px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.25);
+  width: min(480px, calc(100vw - 32px));
   max-height: 70vh;
   display: flex;
   flex-direction: column;
@@ -1304,28 +1306,6 @@ h1 {
   font-weight: 500;
   border-bottom: 1px solid #e5e7eb;
   margin-bottom: 4px;
-}
-
-/* On phones the fixed 420px picker is wider than the screen and its text got clipped
-   on the left (full-bleed 100vw / fixed-inset misbehaves on iOS Safari). Anchor it to
-   the top (next to the form) and size it to the screen WITH small side margins so the
-   target names are never clipped. */
-@media (max-width: 1000px) {
-  /* Pin the picker to the viewport with EXPLICIT offsets — not `inset` and not `vw`,
-     both of which misbehave on iOS Safari (layout viewport wider than visual), leaving
-     the picker off-screen / clipped / crammed at the top. Small margins = modal look. */
-  .move-picker {
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
-    width: auto;
-    max-width: none;
-    height: auto;
-    max-height: none;
-    margin: 0;
-  }
 }
 
 .delete-btn {
