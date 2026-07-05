@@ -914,6 +914,13 @@ h1 {
   .todo-item {
     min-width: 960px;
   }
+  /* iOS Safari repaint fix: a position:sticky header composites the page and stops the
+     add-task input from repainting while typing (text stays invisible until blur). Drop
+     sticky on mobile (h-scroll makes it awkward there anyway) and give the input its own
+     GPU layer so it always repaints. */
+  .todo-header {
+    position: static;
+  }
   /* Add form: stack the title on its own row and let the date/status/button
      wrap to a second row, so the form fits a phone instead of overflowing. */
   .add-form {
@@ -922,6 +929,7 @@ h1 {
   .add-input {
     flex: 1 1 100%;
     min-width: 0;
+    transform: translateZ(0);
   }
   /* Let the header action buttons wrap instead of overflowing the screen. */
   .app-header {
