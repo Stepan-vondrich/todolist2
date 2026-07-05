@@ -945,6 +945,12 @@ h1 {
     width: 100%;
     max-width: 100%;
   }
+  /* The header sticks to the table's scroll box here. A sticky element that must also
+     translate horizontally leaves a stray scrollbar/line artifact on iOS Safari after
+     overlays open/close, so drop sticky on mobile — it just scrolls with the rows. */
+  .todo-header {
+    position: static;
+  }
   /* The Název column is sized in JS (--name-region = max over visible rows of
      indent + text width) so no title is squeezed. The table's min width grows with it
      (~780px covers the fixed columns + gaps), and the table scrolls horizontally.
