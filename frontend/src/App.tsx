@@ -78,7 +78,19 @@ function ScrollDebug() {
     const seen = new Map<string, number>()
     const render = () => {
       const de = document.documentElement
-      const lines = [`vw${window.innerWidth} docSW${de.scrollWidth} pageX${Math.round(window.scrollX)} htmlSL${de.scrollLeft} bodySL${document.body.scrollLeft}`]
+      const vw = window.innerWidth
+      const lines = [`vw${vw} docSW${de.scrollWidth} htmlSL${de.scrollLeft} bodySL${document.body.scrollLeft}`]
+      // widest elements NOT inside a scroll/clip container — these push the page wide
+      const past: { s: string; r: number }[] = []
+      document.querySelectorAll<HTMLElement>('body *').forEach(el => {
+        const r = el.getBoundingClientRect()
+        if (r.right <= vw + 1 || r.width < 1) return
+        let p = el.parentElement, contained = false
+        while (p) { if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(p).overflowX)) { contained = true; break } p = p.parentElement }
+        if (!contained) past.push({ s: `${(typeof el.className === 'string' && el.className ? el.className : el.tagName).slice(0, 18)} r${Math.round(r.right)} w${Math.round(r.width)}`, r: r.right })
+      })
+      past.sort((a, b) => b.r - a.r)
+      past.slice(0, 4).forEach(p => lines.push('▶ ' + p.s))
       for (const [k, v] of seen) lines.push(`${k}: sL${v}`)
       setInfo(lines.join('\n'))
     }
