@@ -7,6 +7,16 @@ body {
   min-height: 100vh;
 }
 
+/* iOS Safari in dark mode defaults form-control text, fill and caret to WHITE. Our
+   fields sit on white backgrounds, so typed text was invisible (white on white). Pin a
+   dark text color; -webkit-text-fill-color: currentColor beats the UA white and follows
+   `color`, so inputs that set their own color still render correctly. */
+input, textarea, select {
+  color: #1f2937;
+  -webkit-text-fill-color: currentColor;
+  caret-color: #6366f1;
+}
+
 .app {
   margin: 48px 24px;
 }
@@ -906,20 +916,11 @@ h1 {
 @media (max-width: 1000px) {
   .todo-table {
     overflow-x: auto;
-    /* NOTE: no -webkit-overflow-scrolling: touch — on iOS Safari it puts the table on
-       its own compositing layer, which stops inputs elsewhere on the page (the add-task
-       field) from repainting while typing. Momentum scrolling is native on modern iOS. */
+    -webkit-overflow-scrolling: touch;
   }
   .todo-header,
   .todo-item {
     min-width: 960px;
-  }
-  /* iOS Safari repaint fix: a position:sticky header composites the page and stops the
-     add-task input from repainting while typing (text stays invisible until blur). Drop
-     sticky on mobile (h-scroll makes it awkward there anyway) and give the input its own
-     GPU layer so it always repaints. */
-  .todo-header {
-    position: static;
   }
   /* Add form: stack the title on its own row and let the date/status/button
      wrap to a second row, so the form fits a phone instead of overflowing. */
@@ -929,7 +930,6 @@ h1 {
   .add-input {
     flex: 1 1 100%;
     min-width: 0;
-    transform: translateZ(0);
   }
   /* Let the header action buttons wrap instead of overflowing the screen. */
   .app-header {
