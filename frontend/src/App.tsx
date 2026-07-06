@@ -72,6 +72,7 @@ const SHOW_PLANNER = false
 interface UsageInfo {
   db: { provider: string; usedBytes: number; limitBytes: number }
   uploads: { usedBytes: number; fileCount: number }
+  ghcr: { usedBytes: number; limitBytes: number } | null
   generatedAt: string
 }
 
@@ -730,9 +731,23 @@ export default function App() {
                     </div>
                     <div className="limit-note">Měřené, ale haléře (~€0,05/GB). Bez ostrého limitu.</div>
                   </div>
+                  {usage.ghcr && (() => {
+                    const gpct = Math.min(100, (usage.ghcr.usedBytes / usage.ghcr.limitBytes) * 100)
+                    const gcolor = gpct > 90 ? '#dc2626' : gpct > 70 ? '#d97706' : '#16a34a'
+                    return (
+                      <div className="limit-row">
+                        <div className="limit-head">
+                          <span>GHCR — image storage</span>
+                          <span>{MB(usage.ghcr.usedBytes).toFixed(1)} / {MB(usage.ghcr.limitBytes).toFixed(0)} MB · {gpct.toFixed(1)}%</span>
+                        </div>
+                        <div className="limit-track"><div className="limit-fill" style={{ width: `${gpct}%`, background: gcolor }} /></div>
+                        <div className="limit-note">Free do 500 MB (private package). Transfer 1 GB/měs se měří mimo appku.</div>
+                      </div>
+                    )
+                  })()}
                   <div className="limit-static">
                     <div>Container Apps: prod teplá replika 9–22 ≈ €1,5/měs (compute, ne MB)</div>
-                    <div>GHCR image: transfer 1 GB/měs zdarma (měří se mimo appku)</div>
+                    <div>Actions (CI): public repo → zdarma neomezeně</div>
                     <div className="limit-note">Měřeno z prostředí <b>{env}</b> · {new Date(usage.generatedAt).toLocaleTimeString()}</div>
                   </div>
                 </div>
