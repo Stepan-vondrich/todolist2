@@ -11,24 +11,6 @@ import { findMatchIndex, findAllMatchRangesIgnoringSpace } from '../utils/findMa
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
-// On the dev host only, surface PDF load errors on-screen (we can't read the iOS
-// Safari console remotely). iOS often can't start pdf.js's module worker — this tells
-// us whether that (or fetch/render) is what fails.
-const PDF_DEBUG = typeof location !== 'undefined' && location.hostname.includes('todolist-dev')
-
-// Feature-detect module-worker support (the `type` getter only fires when the browser
-// honours the option). pdf.js ships a `.mjs` module worker; older iOS Safari can't run it.
-function supportsModuleWorker(): boolean {
-  let supported = false
-  try {
-    const url = URL.createObjectURL(new Blob(['']))
-    const w = new Worker(url, { get type(): WorkerType { supported = true; return 'module' } } as WorkerOptions)
-    w.terminate()
-    URL.revokeObjectURL(url)
-  } catch { /* ignore */ }
-  return supported
-}
-
 // --- helpers ---
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -504,7 +486,6 @@ function PdfViewer({ src, query, initialPage, onNav }: {
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<'loading' | 'done' | 'error'>('loading')
-  const [errMsg, setErrMsg] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -646,30 +627,7 @@ function PdfViewer({ src, query, initialPage, onNav }: {
       } catch (e) {
         if (!cancelled) {
           setStatus('error')
-          const err = e as Error
-          const g = globalThis as Record<string, unknown>
-          const miss: string[] = []
-          const check = (name: string, ok: boolean) => { if (!ok) miss.push(name) }
-          check('Promise.withResolvers', typeof (Promise as unknown as Record<string, unknown>).withResolvers === 'function')
-          const arrProto = Array.prototype as unknown as Record<string, unknown>
-          check('Array.at', typeof arrProto.at === 'function')
-          check('Array.findLast', typeof arrProto.findLast === 'function')
-          check('Array.fromAsync', typeof (Array as unknown as Record<string, unknown>).fromAsync === 'function')
-          check('Object.hasOwn', typeof (Object as unknown as Record<string, unknown>).hasOwn === 'function')
-          check('Object.groupBy', typeof (Object as unknown as Record<string, unknown>).groupBy === 'function')
-          check('structuredClone', typeof g.structuredClone === 'function')
-          check('ReadableStream.asyncIterator',
-            typeof (ReadableStream?.prototype as unknown as Record<symbol, unknown>)?.[Symbol.asyncIterator] === 'function')
-          const info = [
-            `${err?.name || 'Error'}: ${err?.message || String(e)}`,
-            `pdfjs ${pdfjsLib.version}`,
-            `missing: ${miss.length ? miss.join(', ') : 'none of the probed'}`,
-            `moduleWorker=${supportsModuleWorker()}`,
-            `UA: ${navigator.userAgent}`,
-            (err?.stack || '').split('\n').slice(1, 3).join(' | '),
-          ].filter(Boolean).join('\n')
-          console.error('[PdfViewer] load failed:', e, '\n', info)
-          setErrMsg(info)
+          console.error('[PdfViewer] load failed:', e)
         }
       }
     })()
@@ -680,16 +638,7 @@ function PdfViewer({ src, query, initialPage, onNav }: {
   return (
     <div className="pdf-viewer-scroll" onClick={e => e.stopPropagation()}>
       {status === 'loading' && <div className="pdf-viewer-loading">⏳ Načítám PDF…</div>}
-      {status === 'error'   && (
-        <div className="pdf-viewer-loading">
-          ❌ PDF se nepodařilo načíst.
-          {PDF_DEBUG && errMsg && (
-            <pre style={{ marginTop: 10, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              textAlign: 'left', color: '#fca5a5', background: 'rgba(0,0,0,0.6)', padding: 10, borderRadius: 8,
-              maxWidth: '90vw' }}>{errMsg}</pre>
-          )}
-        </div>
-      )}
+      {status === 'error'   && <div className="pdf-viewer-loading">❌ PDF se nepodařilo načíst.</div>}
       {/* This inner div is owned by the effect (manual DOM); keep it free of React children. */}
       <div ref={containerRef} className="pdf-viewer-pages" />
     </div>

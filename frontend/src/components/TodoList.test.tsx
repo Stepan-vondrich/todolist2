@@ -335,10 +335,10 @@ describe('TodoList', () => {
       const subsub = makeTodo(3, 'SubSub', { parentId: 2 })
       renderList({ todos: [root, sub, subsub], onUpdate: noop, onDelete: noop })
 
-      // Indentation is rendered as a leading spacer span of width depth*36px inside each row.
+      // Indentation is rendered as a leading spacer span of width depth*20px inside each row.
       const items = screen.getAllByRole('listitem')
-      expect(items[1].querySelector('span')).toHaveStyle({ width: '36px' })
-      expect(items[2].querySelector('span')).toHaveStyle({ width: '72px' })
+      expect(items[1].querySelector('span')).toHaveStyle({ width: '20px' })
+      expect(items[2].querySelector('span')).toHaveStyle({ width: '40px' })
     })
   })
 })
