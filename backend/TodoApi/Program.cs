@@ -94,6 +94,24 @@ using (var scope = app.Services.CreateScope())
     if (pending.Count > 0) db.SaveChanges();
 }
 
+// Optional Basic Auth gate — protects the WHOLE app (static files, uploads, API) when
+// APP_AUTH_USER + APP_AUTH_PASS are set (the Azure containers). Unset (local exe) = open.
+var authUser = Environment.GetEnvironmentVariable("APP_AUTH_USER");
+var authPass = Environment.GetEnvironmentVariable("APP_AUTH_PASS");
+if (!string.IsNullOrEmpty(authUser) && !string.IsNullOrEmpty(authPass))
+{
+    app.Use(async (ctx, next) =>
+    {
+        if (TodoApi.BasicAuth.IsAuthorized(ctx.Request.Headers.Authorization.ToString(), authUser, authPass))
+            await next();
+        else
+        {
+            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            ctx.Response.Headers.WWWAuthenticate = "Basic realm=\"Todo\", charset=\"UTF-8\"";
+        }
+    });
+}
+
 app.UseCors();
 
 app.UseDefaultFiles();
