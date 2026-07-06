@@ -6,7 +6,7 @@
 Aplikace: fullstack TODO list
   - Frontend: React + TypeScript (build nástrojem Vite)
   - Backend:  C# ASP.NET Core Web API (.NET 8)
-  - Data:     původně SQLite, ve finále Azure SQL (vysvětleno níže)
+  - Data:     SQLite (lokálně) -> Azure SQL -> nakonec Neon Postgres (viz ČÁST C)
 
 Cíl: vzít hotovou aplikaci, zabalit ji do Docker image, nahrát do registru
      a rozběhnout v Azure Container Apps na adrese
@@ -273,10 +273,12 @@ Co jsem pro to udělal:
      - proměnná DATA_DIR=/data -> appka ukládá přílohy do /data/uploads,
      - to je perzistentní (přežije restart).
 
-Finální stav (revize 0000004):
+Stav v této fázi (revize 0000004):
   - Databáze:  Azure SQL  (server sqltodo783a4e6d-swedencentral, db tododb)
   - Přílohy:   Azure Files (share tododata -> /data/uploads)
   - Tajný kód: azure-sql-connection (connection string)
+  >>> POZDĚJI NAHRAZENO: Azure SQL -> Neon Postgres, ACR -> GHCR, Azure SQL
+      i ACR SMAZÁNY (náklad na ~€0). Aktuální finální stav viz ČÁST C níže.
 
 OVĚŘENÍ PERZISTENCE (klíčový test):
   1) Přes API jsem vytvořil testovací TODO.
@@ -287,6 +289,118 @@ OVĚŘENÍ PERZISTENCE (klíčový test):
 
 
 ================================================================================
+  ČÁST C – OPTIMALIZACE NÁKLADŮ A STARTU
+           (pozdější přechod: ACR->GHCR, Azure SQL->Neon; náklad ~€5/měs -> ~€0)
+================================================================================
+
+Nasazení z ČÁSTI A/B fungovalo, ale mělo dvě slabiny:
+  - Jediný reálný NÁKLAD byl Azure Container Registry (ACR) v tieru Basic:
+    ~€5/měsíc PAUŠÁLNĚ, jen za to, že registr existuje (ne za používání).
+    Vše ostatní (Azure SQL free-limit, Container Apps scale-to-zero, Azure
+    Files) vyšlo prakticky na €0.
+  - Azure SQL (serverless) se při nečinnosti USPÍ; první požadavek ji musí
+    probudit -> pomalejší studený start + otravný "probudit DB před prod
+    deployem" krok v pipeline (firewall rule -> SELECT 1 -> schema krok).
+
+Cíl: srazit náklad na ~€0 a zjednodušit provoz, BEZ ztráty funkčnosti.
+
+--------------------------------------------------------------------------------
+  C1) REGISTR: ACR -> GitHub Container Registry (GHCR)   [OK]
+--------------------------------------------------------------------------------
+Registr je jen ÚLOŽIŠTĚ image — appce za běhu nic nedává, takže ho lze
+nahradit levnějším bez dopadu na funkčnost.
+
+GHCR (ghcr.io) je registr od GitHubu; pro tento (veřejný) repo je ZDARMA a
+integruje se s Actions (push přes vestavěný GITHUB_TOKEN, žádné další údaje).
+  - Package jsem nastavil jako PRIVATE. Aby si image Container Apps stáhly,
+    potřebují token: classic PAT se scope jen "read:packages" a "No expiration"
+    (set-and-forget, žádná rotace; kdyby unikl, jde jedním klikem Revoke).
+    Token je uložený jako registry credential na OBOU Container Apps.
+  - cd.yml: build se přihlásí do GHCR (GITHUB_TOKEN) a pushne image tam;
+    dev i prod pak tahají ghcr.io/stepan-vondrich/todolist2:<sha>.
+  - Po ověření, že dev i prod běží z GHCR, jsem ACR SMAZAL (az acr delete)
+    -> ten ~€5/měsíc zmizel.
+
+  (POZN.: kdyby image byla PUBLIC, je zdarma úplně bez tokenu — a protože
+   zdroják už veřejný je a v image nejsou žádné secrets, bylo by to bezpečné.
+   Private jsem zvolil jen kvůli skrytí image; funkčně je to jedno.)
+  (TRADE-OFF: GHCR není v mém Azure regionu jako ACR, takže úplně první pull
+   při studeném startu je o ~1-2 s pomalejší. Image se na node kešuje -> jinak
+   zanedbatelné.)
+
+--------------------------------------------------------------------------------
+  C2) DATABÁZE: Azure SQL -> Neon (serverless Postgres, externí)   [OK]
+--------------------------------------------------------------------------------
+Neon je externí serverless PostgreSQL s free tierem (0,5 GB, scale-to-zero,
+probudí se za ~1 s). Vždy dostupný, bez měsíčního limitu hodin.
+
+  - ÚPRAVA KÓDU: appka teď umí i Postgres. Výběr provideru podle env var,
+    od nejkonkrétnějšího:
+        POSTGRES_CONNECTION  -> Postgres (Neon)   [UseNpgsql]
+        AZURE_SQL_CONNECTION -> Azure SQL          [UseSqlServer]
+        nic                  -> SQLite (lokální)   [Migrate]
+    Přidal jsem NuGet Npgsql.EntityFrameworkCore.PostgreSQL a třídu
+    PgConnection.Normalize (převede Neonův "postgres://..." URI na formát pro
+    Npgsql; pokrytO xUnit testem — TDD červená/zelená).
+  - IZOLACE DEV/PROD: každé prostředí má SVŮJ Neon projekt (vlastní data i
+    vlastní free 0,5 GB):
+        dev  -> projekt "tododb"       (POSTGRES_CONNECTION na todolist-dev)
+        prod -> projekt "tododb-prod"  (POSTGRES_CONNECTION na app-containerapp-01)
+    Sdílená je jen IMAGE; DB jsou oddělené, data se nikdy nemíchají.
+  - SCHÉMA: Postgres si appka vytvoří sama při startu (EnsureCreated), takže
+    ODPADL krok "Apply prod DB schema" (azure/sql-action) v pipeline i celý
+    "probudit DB před deployem" tanec.
+  - Po ověření jsem Azure SQL SMAZAL (server + db + Container App secret + env
+    var + GitHub secret AZURE_SQL_CONNECTION + obsolete db/prod-schema.sql).
+
+  (Přílohy (uploads) ZŮSTÁVAJÍ na Azure Files — soubory zamykání nepotřebují,
+   přes SMB fungují dál. Mění se jen databáze.)
+  (Data: je to demo, prod se rozjel na PRÁZDNÉ Neon DB; migrace SQL Server ->
+   Postgres by byla netriviální a nebyla potřeba.)
+
+--------------------------------------------------------------------------------
+  C3) MENŠÍ IMAGE + RYCHLEJŠÍ STUDENÝ START   [OK]
+--------------------------------------------------------------------------------
+Úprava běhové fáze Dockerfile:
+  - aspnet:8.0 -> aspnet:8.0-alpine (~220 MB -> ~110 MB, rychlejší pull).
+    Alpine nemá ICU (knihovny národního prostředí) -> doinstaloval jsem
+    "icu-libs" + "icu-data-full" (jinak by české datum/formátování spadlo do
+    invariant režimu).
+  - PublishReadyToRun=true — předkompiluje IL na nativní kód (linux-musl-x64),
+    takže start dělá míň JIT kompilace.
+  Výsledek: cold start ~27 s -> ~21 s. Zbytek drží aktivace Container App
+  (naplánování na node) + probuzení Neonu; na to už image nemá vliv (dál by
+  pomohlo jen držet 1 repliku teplou = min-replicas 1, to ale stojí pár korun).
+
+--------------------------------------------------------------------------------
+  AKTUÁLNÍ CD PIPELINE (GHCR-only)  — nahrazuje verzi z bodu 6 níže
+--------------------------------------------------------------------------------
+Build už se NEpřihlašuje do Azure kvůli registru (GHCR jede na GITHUB_TOKEN),
+deploy-prod už NEMÁ schema krok (Postgres = EnsureCreated). Zjednodušeně:
+  permissions: { packages: write }        # aby GITHUB_TOKEN mohl push na GHCR
+  env: GHCR: ghcr.io/stepan-vondrich/todolist2
+  build:      docker login ghcr.io (GITHUB_TOKEN) -> docker build+push $GHCR:<sha>
+  deploy-dev: az containerapp update -n todolist-dev  --image $GHCR:<sha>   (auto)
+  deploy-prod:az containerapp update -n app-containerapp-01 --image $GHCR:<sha>  (approval gate)
+Registry creds (PAT) na obou appkách jednorázově:
+  az containerapp registry set -n <app> -g rg-containerapp-test-01 \
+     --server ghcr.io --username Stepan-vondrich --password <PAT-read:packages-noexpiry>
+
+--------------------------------------------------------------------------------
+  FINÁLNÍ STAV PO OPTIMALIZACI  (nahrazuje "finální stav" z KROKU 5 i bodu 7)
+--------------------------------------------------------------------------------
+  Registr:  GHCR (private, zdarma) — dev i prod;  ACR SMAZÁN
+  Databáze: Neon Postgres — dev i prod KAŽDÝ SVŮJ projekt;  Azure SQL SMAZÁN
+  Přílohy:  Azure Files (share tododata -> /data/uploads) — beze změny
+  Image:    alpine + ReadyToRun (menší, rychlejší start)
+  NÁKLAD:   z ~€5/měsíc na PRAKTICKY €0
+
+  Rozdíl dev vs prod = jen env proměnná (POSTGRES_CONNECTION míří na jinou
+  Neon DB). Stejná image v obou = "build once, deploy many" (dev testuje
+  přesně prod kód).
+
+
+================================================================================
   KAM SE UKLÁDAJÍ PŘÍLOHY KOMENTÁŘŮ (rychlá odpověď)
 ================================================================================
 
@@ -294,7 +408,8 @@ OVĚŘENÍ PERZISTENCE (klíčový test):
                      (v kontejneru cesta /data/uploads).
                      V portálu: Účet úložiště sttodolist783a4e6d ->
                      Sdílené složky souborů -> tododata -> uploads.
-  - Metadata (cesta, typ, náhled): v Azure SQL, tabulka CommentAttachments.
+  - Metadata (cesta, typ, náhled): v databázi (teď Neon Postgres, dřív
+                     Azure SQL — viz ČÁST C), tabulka CommentAttachments.
   - Lokálně: složka "uploads" vedle .exe + SQLite todos.db.
 
 
@@ -334,6 +449,11 @@ OVĚŘENÍ PERZISTENCE (klíčový test):
   Secret            = tajná hodnota (heslo, connection string) uložená v appce
   Resource provider = služba Azure, kterou je třeba v subscription zaregistrovat
   TLS interception  = antivirus/proxy odposlouchává HTTPS vlastním certifikátem
+  GHCR              = GitHub Container Registry (registr od GitHubu; pro veřejný repo zdarma)
+  PAT               = Personal Access Token GitHubu (přístupový token; scope read:packages)
+  Neon              = externí serverless PostgreSQL (free tier 0,5 GB, scale-to-zero)
+  ReadyToRun (R2R)  = předkompilace .NET IL na nativní kód -> rychlejší start (míň JITu)
+  ICU               = knihovny národního prostředí (data/formátování); Alpine je nemá defaultně
 ================================================================================
 
 
@@ -649,12 +769,14 @@ az containerapp env storage set -n env-containerapp-ne-01 -g rg-containerapp-tes
 RUČNĚ jednou (počáteční infra): npm/dotnet/docker build, az acr create, docker push,
             az containerapp create/update/ingress/yaml, az sql + storage, service principal.
 AUTOMATIZOVÁNO (hotovo):  GitHub repo + push; CD pipeline (cd.yml) na každý push do master:
-            build -> push do ACR -> deploy DEV (automaticky) -> deploy PROD (manual
-            approval gate, čeká na odkliknutí).
-PROSTŘEDÍ:  DEV  = todolist-dev (SQLite ephemeral, zdarma) – sem se nasazuje automaticky;
-            PROD = app-containerapp-01 (Azure SQL + Azure Files) – jen po schválení.
-MOŽNÉ DÁL:  CI s automatickými testy na pushi (dotnet test / vitest), dev s vlastní DB,
-            varianta Azure DevOps, otužení (startup probe / SQL auto-pause).
+            build -> push do GHCR -> deploy DEV (automaticky) -> deploy PROD (manual
+            approval gate, čeká na odkliknutí).   [dřív ACR, viz ČÁST C]
+PROSTŘEDÍ:  DEV  = todolist-dev (Neon Postgres) – sem se nasazuje automaticky;
+            PROD = app-containerapp-01 (Neon Postgres + Azure Files) – jen po schválení.
+            (Každé prostředí má SVŮJ Neon projekt. Dřív dev=SQLite ephemeral,
+             prod=Azure SQL — nahrazeno, viz ČÁST C. ACR i Azure SQL SMAZÁNY.)
+MOŽNÉ DÁL:  CI s automatickými testy na pushi (dotnet test / vitest),
+            varianta Azure DevOps, otužení (startup probe / min-replicas pro instant start).
 ================================================================================
 
 
