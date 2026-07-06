@@ -5,12 +5,17 @@ on:
     branches: [ master ]      # spustí se na každý push do master
   workflow_dispatch: {}        # + ruční spuštění tlačítkem na GitHubu
 
+permissions:
+  contents: read
+  packages: write              # dovolí GITHUB_TOKEN pushnout image na GHCR
+
 env:
   ACR: acrtodolist783a4e6d.azurecr.io
+  GHCR: ghcr.io/stepan-vondrich/todolist2   # dev tahá image odsud (zdarma)
   IMAGE: todolist2
   RG: rg-containerapp-test-01
-  APP: app-containerapp-01     # prod
-  APP_DEV: todolist-dev        # dev (SQLite ephemeral)
+  APP: app-containerapp-01     # prod (Azure SQL, image z ACR)
+  APP_DEV: todolist-dev        # dev (Neon Postgres, image z GHCR)
 
 jobs:
   build:
@@ -22,11 +27,19 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
       - name: ACR login
         run: az acr login --name acrtodolist783a4e6d
-      - name: Build & push image
+      - name: Build & push image to ACR (prod pulls from here)
         run: |
           docker build -t "$ACR/$IMAGE:${{ github.sha }}" -t "$ACR/$IMAGE:latest" .
           docker push "$ACR/$IMAGE:${{ github.sha }}"
           docker push "$ACR/$IMAGE:latest"
+      - name: GHCR login
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Push same image to GHCR (dev pulls from here, free)
+        run: |
+          docker tag "$ACR/$IMAGE:${{ github.sha }}" "$GHCR:${{ github.sha }}"
+          docker tag "$ACR/$IMAGE:latest" "$GHCR:latest"
+          docker push "$GHCR:${{ github.sha }}"
+          docker push "$GHCR:latest"
 
   deploy-dev:
     needs: build
@@ -37,8 +50,8 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
       - name: Ensure containerapp extension
         run: az extension add --name containerapp --only-show-errors
-      - name: Deploy to DEV
-        run: az containerapp update -n "$APP_DEV" -g "$RG" --image "$ACR/$IMAGE:${{ github.sha }}"
+      - name: Deploy to DEV (GHCR image)
+        run: az containerapp update -n "$APP_DEV" -g "$RG" --image "$GHCR:${{ github.sha }}"
 
   deploy-prod:
     needs: deploy-dev           # do prod až po úspěšném dev
