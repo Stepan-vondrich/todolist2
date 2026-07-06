@@ -45,19 +45,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: production      # APPROVAL GATE – čeká na tvé odkliknutí
     steps:
-      - uses: actions/checkout@v4
       - uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-      # Apply idempotent schema changes to the prod Azure SQL DB BEFORE rolling out
-      # the new image (EnsureCreated doesn't migrate). sql-action adds a temporary
-      # firewall rule for the runner via the azure/login session.
-      - name: Apply prod DB schema (idempotent)
-        uses: azure/sql-action@v2
-        with:
-          connection-string: ${{ secrets.AZURE_SQL_CONNECTION }}
-          path: ./db/prod-schema.sql
       - name: Ensure containerapp extension
         run: az extension add --name containerapp --only-show-errors
+      # Prod runs on Postgres (Neon) now — the app's EnsureCreated builds the schema at
+      # startup, so no separate SQL migration step (and no Azure SQL) is needed.
       - name: Deploy to PROD
         run: az containerapp update -n "$APP" -g "$RG" --image "$GHCR:${{ github.sha }}"
