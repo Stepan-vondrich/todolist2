@@ -11,7 +11,7 @@ namespace TodoApi.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ExportController(AppDbContext db) : ControllerBase
+public class ExportController(AppDbContext db, ILogger<ExportController> logger) : ControllerBase
 {
     public record PasswordDto(string Password, bool IncludeFiles = true);
 
@@ -66,7 +66,7 @@ public class ExportController(AppDbContext db) : ControllerBase
             }
         }
 
-        var encrypted = Encrypt(zipMs.ToArray(), req.Password);
+        var encrypted = BackupCrypto.Encrypt(zipMs.ToArray(), req.Password);
         return File(encrypted, "application/octet-stream", "todolist.backup");
     }
 
@@ -81,35 +81,62 @@ public class ExportController(AppDbContext db) : ControllerBase
         if (string.IsNullOrWhiteSpace(password))
             return BadRequest("Password is required.");
 
-        using var fileMs = new MemoryStream();
-        await file.CopyToAsync(fileMs);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        logger.LogInformation("[import] start: uploaded={UploadMB:F1} MB, mode={Mode}", file.Length / 1024.0 / 1024.0, mode);
 
-        byte[] zipBytes;
-        try { zipBytes = Decrypt(fileMs.ToArray(), password); }
-        catch { return BadRequest("Wrong password or corrupted file."); }
-
+        // Stream-decrypt the upload to a temp file on disk, then read the zip from disk.
+        // Keeps peak memory in the low-MB range even for multi-hundred-MB backups, instead
+        // of holding several full copies of the payload in RAM (the old MemoryStream path
+        // OOM'd the small container on large imports).
+        var tempZip = Path.Combine(Path.GetTempPath(), $"todobackup_{Guid.NewGuid():N}.zip");
         ExportData data;
         try
         {
-            using var zipMs = new MemoryStream(zipBytes);
-            using var zip = new ZipArchive(zipMs, ZipArchiveMode.Read);
-
-            var dataEntry = zip.GetEntry("data.json") ?? throw new Exception("Missing data.json");
-            using var reader = new StreamReader(dataEntry.Open());
-            data = JsonSerializer.Deserialize<ExportData>(await reader.ReadToEndAsync(), JsonOpts)!;
-
-            var uploadsDir = TodoApi.DataPaths.Uploads;
-            Directory.CreateDirectory(uploadsDir);
-            foreach (var entry in zip.Entries.Where(e => e.FullName.StartsWith("files/") && e.Name.Length > 0))
+            try
             {
-                var destPath = Path.Combine(uploadsDir, entry.Name);
-                if (mode != "replace" && System.IO.File.Exists(destPath)) continue;
-                await using var src = entry.Open();
-                await using var dst = System.IO.File.Create(destPath);
-                await src.CopyToAsync(dst);
+                await using var input = file.OpenReadStream();
+                await using var dec = System.IO.File.Create(tempZip);
+                await BackupCrypto.DecryptToStreamAsync(input, password, dec);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning("[import] decrypt failed after {Ms} ms: {Error}", sw.ElapsedMilliseconds, ex.Message);
+                return BadRequest("Wrong password or corrupted file.");
+            }
+            logger.LogInformation("[import] decrypted to temp: {ZipMB:F1} MB in {Ms} ms",
+                new FileInfo(tempZip).Length / 1024.0 / 1024.0, sw.ElapsedMilliseconds);
+
+            try
+            {
+                using var zip = ZipFile.OpenRead(tempZip);
+
+                var dataEntry = zip.GetEntry("data.json") ?? throw new Exception("Missing data.json");
+                await using (var dataStream = dataEntry.Open())
+                    data = (await JsonSerializer.DeserializeAsync<ExportData>(dataStream, JsonOpts))!;
+                logger.LogInformation("[import] parsed data.json: todos={Todos}, comments={Comments}, sessions={Sessions}, overlaps={Overlaps}, logs={Logs}",
+                    data.Todos.Count, data.Comments.Count, (data.Sessions ?? []).Count, (data.Overlaps ?? []).Count, (data.Logs ?? []).Count);
+
+                var uploadsDir = TodoApi.DataPaths.Uploads;
+                Directory.CreateDirectory(uploadsDir);
+                int extracted = 0;
+                foreach (var entry in zip.Entries.Where(e => e.FullName.StartsWith("files/") && e.Name.Length > 0))
+                {
+                    var destPath = Path.Combine(uploadsDir, entry.Name);
+                    if (mode != "replace" && System.IO.File.Exists(destPath)) continue;
+                    await using var src = entry.Open();
+                    await using var dst = System.IO.File.Create(destPath);
+                    await src.CopyToAsync(dst);
+                    extracted++;
+                }
+                logger.LogInformation("[import] extracted {Extracted} attachment file(s) in {Ms} ms total", extracted, sw.ElapsedMilliseconds);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "[import] unzip/parse failed after {Ms} ms", sw.ElapsedMilliseconds);
+                return BadRequest($"Invalid backup: {ex.Message}");
             }
         }
-        catch (Exception ex) { return BadRequest($"Invalid backup: {ex.Message}"); }
+        finally { try { System.IO.File.Delete(tempZip); } catch { } }
 
         var backupSessions = data.Sessions ?? [];
         var backupOverlaps = data.Overlaps ?? [];
@@ -207,6 +234,8 @@ public class ExportController(AppDbContext db) : ControllerBase
             addedLogs     = backupLogs.Count;
         }
 
+        logger.LogInformation("[import] done in {Ms} ms: +{Todos} todos, +{Comments} comments, +{Sessions} sessions, +{Overlaps} overlaps, +{Logs} logs (mode={Mode})",
+            sw.ElapsedMilliseconds, addedTodos, addedComments, addedSessions, addedOverlaps, addedLogs, mode);
         return Ok(new { todos = addedTodos, comments = addedComments, sessions = addedSessions, overlaps = addedOverlaps, logs = addedLogs, mode });
     }
 
@@ -444,32 +473,5 @@ public class ExportController(AppDbContext db) : ControllerBase
         }
         result.Add(sb.ToString());
         return result;
-    }
-
-    static byte[] Encrypt(byte[] plaintext, string password)
-    {
-        var salt = RandomNumberGenerator.GetBytes(16);
-        var iv   = RandomNumberGenerator.GetBytes(16);
-        var key  = Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(password), salt, 100_000, HashAlgorithmName.SHA256, 32);
-        using var aes = Aes.Create();
-        aes.Key = key; aes.IV = iv;
-        using var ms = new MemoryStream();
-        ms.Write(salt); ms.Write(iv);
-        using (var cs = new CryptoStream(ms, aes.CreateEncryptor(), CryptoStreamMode.Write))
-            cs.Write(plaintext);
-        return ms.ToArray();
-    }
-
-    static byte[] Decrypt(byte[] data, string password)
-    {
-        var salt = data[..16];
-        var iv   = data[16..32];
-        var key  = Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(password), salt, 100_000, HashAlgorithmName.SHA256, 32);
-        using var aes = Aes.Create();
-        aes.Key = key; aes.IV = iv;
-        using var ms = new MemoryStream();
-        using (var cs = new CryptoStream(new MemoryStream(data[32..]), aes.CreateDecryptor(), CryptoStreamMode.Read))
-            cs.CopyTo(ms);
-        return ms.ToArray();
     }
 }
