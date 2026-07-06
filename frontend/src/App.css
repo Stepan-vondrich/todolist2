@@ -744,6 +744,37 @@ h1 {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* Free-tier usage panel */
+.limits-modal { width: min(440px, calc(100vw - 32px)); }
+.limits-body { display: flex; flex-direction: column; gap: 16px; margin: 6px 0 4px; }
+.limit-row { display: flex; flex-direction: column; gap: 5px; }
+.limit-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+}
+.limit-head span:last-child { font-weight: 500; color: #6b7280; white-space: nowrap; }
+.limit-track {
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.limit-fill { height: 100%; border-radius: 999px; transition: width 0.3s; }
+.limit-note { font-size: 0.72rem; color: #9ca3af; line-height: 1.4; }
+.limit-static {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 1px solid #f3f4f6;
+  font-size: 0.78rem;
+  color: #6b7280;
+}
 .calendar-modal .btn-secondary {
   padding: 7px 16px;
   border: 1px solid #e5e7eb;

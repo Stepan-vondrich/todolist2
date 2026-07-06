@@ -67,6 +67,14 @@ function parseBookmarkArrays(b: FilterBookmark) {
 // zůstávají v kódu a fungují. Přepni na true pro zobrazení tlačítek 🧭 Teď / 📄 Manifest.
 const SHOW_PLANNER = false
 
+// Live usage vs the free-tier limits (from GET /api/usage) — how close this environment
+// is to where paid billing would start.
+interface UsageInfo {
+  db: { provider: string; usedBytes: number; limitBytes: number }
+  uploads: { usedBytes: number; fileCount: number }
+  generatedAt: string
+}
+
 export default function App() {
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -489,6 +497,21 @@ export default function App() {
   const [csvInfoOpen, setCsvInfoOpen] = useState(false)
   const [csvCopied, setCsvCopied] = useState(false)
 
+  // Free-tier usage panel
+  const [limitsOpen, setLimitsOpen] = useState(false)
+  const [usage, setUsage] = useState<UsageInfo | null>(null)
+  const [usageLoading, setUsageLoading] = useState(false)
+
+  async function fetchUsage() {
+    setUsageLoading(true)
+    try {
+      const res = await fetch('/api/usage')
+      if (res.ok) setUsage(await res.json() as UsageInfo)
+    } catch { /* ignore — panel shows a dash */ }
+    finally { setUsageLoading(false) }
+  }
+  function openLimits() { setLimitsOpen(true); fetchUsage() }
+
   async function handleExport() {
     if (!backupPassword) { setBackupError('Zadej heslo.'); return }
     setBackupBusy(true); setBackupError('')
@@ -579,6 +602,7 @@ export default function App() {
           <button className="backup-btn" onClick={openExport}>↓ Export</button>
           <button className="backup-btn" onClick={openImport}>↑ Import</button>
           <button className="backup-btn" onClick={handleExportTime}>↓ Časování</button>
+          <button className="backup-btn" onClick={openLimits} title="Blízkost placených služeb">📊 Limity</button>
         </div>
       </div>
       {(exportOpen || importOpen) && (
@@ -676,6 +700,49 @@ export default function App() {
                 onClick={exportOpen ? handleExport : handleImport}>
                 {backupBusy ? '…' : exportOpen ? 'Exportovat' : 'Importovat'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {limitsOpen && (
+        <div className="backup-modal-overlay" onClick={() => setLimitsOpen(false)}>
+          <div className="backup-modal limits-modal" onClick={e => e.stopPropagation()}>
+            <div className="backup-modal-title">Blízkost placených služeb</div>
+            {usage ? (() => {
+              const MB = (b: number) => b / 1048576
+              const pct = Math.min(100, (usage.db.usedBytes / usage.db.limitBytes) * 100)
+              const color = pct > 90 ? '#dc2626' : pct > 70 ? '#d97706' : '#16a34a'
+              const env = typeof location !== 'undefined' && location.hostname.includes('todolist-dev') ? 'dev' : 'prod'
+              return (
+                <div className="limits-body">
+                  <div className="limit-row">
+                    <div className="limit-head">
+                      <span>{usage.db.provider} — databáze</span>
+                      <span>{MB(usage.db.usedBytes).toFixed(1)} / {MB(usage.db.limitBytes).toFixed(0)} MB · {pct.toFixed(1)}%</span>
+                    </div>
+                    <div className="limit-track"><div className="limit-fill" style={{ width: `${pct}%`, background: color }} /></div>
+                    <div className="limit-note">Free do 0,5 GB / projekt. Nad limit → placený plán (~$19/měs).</div>
+                  </div>
+                  <div className="limit-row">
+                    <div className="limit-head">
+                      <span>Přílohy — Azure Files</span>
+                      <span>{MB(usage.uploads.usedBytes).toFixed(1)} MB · {usage.uploads.fileCount} souborů</span>
+                    </div>
+                    <div className="limit-note">Měřené, ale haléře (~€0,05/GB). Bez ostrého limitu.</div>
+                  </div>
+                  <div className="limit-static">
+                    <div>Container Apps: prod teplá replika 9–22 ≈ €1,5/měs (compute, ne MB)</div>
+                    <div>GHCR image: transfer 1 GB/měs zdarma (měří se mimo appku)</div>
+                    <div className="limit-note">Měřeno z prostředí <b>{env}</b> · {new Date(usage.generatedAt).toLocaleTimeString()}</div>
+                  </div>
+                </div>
+              )
+            })() : (
+              <div className="limits-body"><p className="limit-note">{usageLoading ? 'Načítám…' : 'Data se nepodařilo načíst.'}</p></div>
+            )}
+            <div className="backup-modal-actions">
+              <button className="backup-cancel-btn" onClick={() => setLimitsOpen(false)}>Zavřít</button>
+              <button className="backup-confirm-btn" disabled={usageLoading} onClick={fetchUsage}>{usageLoading ? '…' : 'Aktualizovat'}</button>
             </div>
           </div>
         </div>
