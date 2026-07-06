@@ -17,12 +17,17 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 // User data (db + uploads) lives under DataPaths.Root, redirectable via DATA_DIR
 // (a mounted persistent volume in the container). Ensure it exists before use.
 Directory.CreateDirectory(TodoApi.DataPaths.Root);
-// Pick the database provider: Azure SQL in the container (persistent, set via the
-// AZURE_SQL_CONNECTION env var), SQLite for the local published exe (file next to the app).
+// Pick the database provider, by env var, most-specific first:
+//   POSTGRES_CONNECTION  -> PostgreSQL (e.g. Neon; used by the dev container)
+//   AZURE_SQL_CONNECTION -> Azure SQL  (prod container, persistent)
+//   neither              -> SQLite     (local published exe, file next to the app)
+var pgConn = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION");
 var azureSqlConn = Environment.GetEnvironmentVariable("AZURE_SQL_CONNECTION");
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
-    if (!string.IsNullOrWhiteSpace(azureSqlConn))
+    if (!string.IsNullOrWhiteSpace(pgConn))
+        opt.UseNpgsql(TodoApi.PgConnection.Normalize(pgConn));
+    else if (!string.IsNullOrWhiteSpace(azureSqlConn))
         opt.UseSqlServer(azureSqlConn);
     else
         opt.UseSqlite($"Data Source={TodoApi.DataPaths.Db}");
