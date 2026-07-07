@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using TodoApi.Data;
 
 namespace TodoApi.Tests;
@@ -74,6 +75,44 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
     }
 
     [Fact]
+    public async Task Export_ThenImport_RestoresCommentAttachments()
+    {
+        var source = ClientFor("rt_att_" + Guid.NewGuid());
+        var create = await source.PostAsJsonAsync("/api/todos", new { Title = "with attach", IsCompleted = false });
+        var todo = await create.Content.ReadFromJsonAsync<TodoResponse>();
+
+        // comment carrying a file attachment (server writes it to uploads + a DB row)
+        var cform = new MultipartFormDataContent
+        {
+            { new StringContent(todo!.Id.ToString()), "todoId" },
+            { new StringContent("see attached"), "text" },
+        };
+        var fc = new ByteArrayContent(Encoding.UTF8.GetBytes("fake png bytes"));
+        fc.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        cform.Add(fc, "file_0", "photo.png");
+        var cresp = await source.PostAsync("/api/comments", cform);
+        Assert.True(cresp.IsSuccessStatusCode, $"comment create failed: {cresp.StatusCode}");
+
+        var exportResp = await source.PostAsJsonAsync("/api/export/export", new { Password = "pw" });
+        var backup = await exportResp.Content.ReadAsByteArrayAsync();
+
+        var target = ClientFor("rt_att2_" + Guid.NewGuid());
+        using var form = ImportForm(backup, "pw");
+        var importResp = await target.PostAsync("/api/export/import", form);
+        Assert.True(importResp.StatusCode == HttpStatusCode.OK,
+            $"import: {importResp.StatusCode} {await importResp.Content.ReadAsStringAsync()}");
+
+        var todos = await target.GetFromJsonAsync<List<TodoResponse>>("/api/todos");
+        var restoredId = todos!.First(t => t.Title == "with attach").Id;
+        var comments = await target.GetFromJsonAsync<List<CommentResponse>>($"/api/comments?todoId={restoredId}");
+
+        Assert.NotNull(comments);
+        var withAtt = comments!.FirstOrDefault(c => c.Attachments.Count > 0);
+        Assert.True(withAtt is not null, "restored comment has no attachments");
+        Assert.Contains(withAtt!.Attachments, a => a.Path.Contains("/uploads/"));
+    }
+
+    [Fact]
     public async Task Import_FileBeforePassword_ReturnsBadRequest()
     {
         var source = ClientFor("rt_ord_" + Guid.NewGuid());
@@ -105,4 +144,6 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
     }
 
     private record TodoResponse(int Id, string Title, bool IsCompleted, string Status);
+    private record CommentResponse(int Id, int TodoId, string Text, List<AttachmentResponse> Attachments);
+    private record AttachmentResponse(int Id, string Path, string? FileName);
 }

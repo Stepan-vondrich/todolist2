@@ -38,7 +38,10 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
             return BadRequest("Password is required.");
 
         var todos    = await db.Todos.OrderBy(t => t.CreatedAt).ToListAsync();
-        var comments = await db.Comments.OrderBy(c => c.CreatedAt).ToListAsync();
+        // Include attachments so their DB rows (path, filename, extracted text) travel in the
+        // backup — otherwise the files land in uploads/ on import but no comment references them,
+        // and images/PDFs render as empty comments.
+        var comments = await db.Comments.Include(c => c.Attachments).OrderBy(c => c.CreatedAt).ToListAsync();
         var sessions = await db.TaskSessions.OrderBy(s => s.StartedAt).ToListAsync();
         var overlaps = await db.TaskOverlaps.OrderBy(o => o.Id).ToListAsync();
         var logs     = await db.TaskLogs.OrderBy(l => l.Id).ToListAsync();
