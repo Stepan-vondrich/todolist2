@@ -280,6 +280,37 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
             addedLogs     = backupLogs.Count;
         }
 
+        // Rows were inserted with explicit PK values, which does NOT advance Postgres identity
+        // sequences — so the next auto-generated Id collides with an already-imported row and
+        // every new todo/comment/subtask fails ("Failed to add subtask"). SQLite tracks max
+        // rowid so this only bites Postgres. Bump each sequence to its column's current max.
+        if (db.Database.IsNpgsql())
+        {
+            await db.Database.ExecuteSqlRawAsync("""
+                DO $$
+                DECLARE rec RECORD; maxid BIGINT;
+                BEGIN
+                  FOR rec IN
+                    SELECT s.relname AS seq, t.relname AS tbl, a.attname AS col
+                    FROM pg_class s
+                    JOIN pg_depend d ON d.objid = s.oid AND d.deptype = 'a'
+                    JOIN pg_class t ON t.oid = d.refobjid
+                    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid
+                    JOIN pg_namespace n ON n.oid = s.relnamespace
+                    WHERE s.relkind = 'S' AND n.nspname = 'public'
+                  LOOP
+                    EXECUTE format('SELECT COALESCE(MAX(%I),0) FROM %I', rec.col, rec.tbl) INTO maxid;
+                    IF maxid < 1 THEN
+                      EXECUTE format('SELECT setval(%L, 1, false)', rec.seq);
+                    ELSE
+                      EXECUTE format('SELECT setval(%L, %s, true)', rec.seq, maxid);
+                    END IF;
+                  END LOOP;
+                END $$;
+                """);
+            logger.LogInformation("[import] resynced Postgres identity sequences");
+        }
+
         logger.LogInformation("[import] done in {Ms} ms: +{Todos} todos, +{Comments} comments, +{Sessions} sessions, +{Overlaps} overlaps, +{Logs} logs (mode={Mode})",
             sw.ElapsedMilliseconds, addedTodos, addedComments, addedSessions, addedOverlaps, addedLogs, mode);
         return Ok(new { todos = addedTodos, comments = addedComments, sessions = addedSessions, overlaps = addedOverlaps, logs = addedLogs, mode });
