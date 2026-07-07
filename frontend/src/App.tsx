@@ -540,15 +540,19 @@ export default function App() {
     setBackupBusy(true); setBackupError('')
     try {
       const fd = new FormData()
-      fd.append('file', importFile)
       let url: string
       if (importFormat === 'csv') {
         url = '/api/export/import-csv'
+        fd.append('file', importFile)
       } else if (importMode === 'time') {
         url = '/api/export/import-time'
+        fd.append('file', importFile)
       } else {
+        // The backup import reads the multipart stream sequentially and needs the
+        // password before the (potentially huge) file part — append it FIRST.
         fd.append('password', backupPassword)
         fd.append('mode', importMode)
+        fd.append('file', importFile)
         url = '/api/export/import'
       }
       const res = await fetch(url, { method: 'POST', body: fd })

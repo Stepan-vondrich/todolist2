@@ -3,7 +3,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Net.Http.Headers;
 using TodoApi.Data;
 using TodoApi.Models;
 
@@ -75,36 +77,77 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
     [HttpPost("import")]
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
-    [Consumes("multipart/form-data")]
-    public async Task<IActionResult> Import([FromForm] string password, IFormFile file, [FromForm] string mode = "replace")
+    public async Task<IActionResult> Import()
     {
-        if (string.IsNullOrWhiteSpace(password))
-            return BadRequest("Password is required.");
-
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        logger.LogInformation("[import] start: uploaded={UploadMB:F1} MB, mode={Mode}", file.Length / 1024.0 / 1024.0, mode);
 
-        // Stream-decrypt the upload to a temp file on disk, then read the zip from disk.
-        // Keeps peak memory in the low-MB range even for multi-hundred-MB backups, instead
-        // of holding several full copies of the payload in RAM (the old MemoryStream path
-        // OOM'd the small container on large imports).
+        // Parse the multipart body ourselves with MultipartReader instead of [FromForm]/IFormFile.
+        // Model binding buffers the whole (multi-hundred-MB) upload to a temp file first and, on
+        // any hiccup, fails opaquely with a 400 ValidationProblemDetails *before* our code runs —
+        // no logs, no clue why. Reading the stream directly lets us decrypt the file part straight
+        // to disk (low memory, single temp file) and log every step. The frontend sends the
+        // password + mode fields *before* the file part so we hold the key when the file arrives.
+        var contentType = Request.ContentType ?? "";
+        if (!contentType.Contains("multipart/", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning("[import] rejected: not multipart (content-type='{CT}')", contentType);
+            return BadRequest("Expected multipart/form-data.");
+        }
+        var boundary = HeaderUtilities.RemoveQuotes(MediaTypeHeaderValue.Parse(contentType).Boundary).Value;
+        if (string.IsNullOrEmpty(boundary))
+            return BadRequest("Missing multipart boundary.");
+        logger.LogInformation("[import] start: content-length={LenMB:F1} MB", (Request.ContentLength ?? 0) / 1024.0 / 1024.0);
+
+        string? password = null;
+        string mode = "replace";
+        bool gotFile = false;
         var tempZip = Path.Combine(Path.GetTempPath(), $"todobackup_{Guid.NewGuid():N}.zip");
         ExportData data;
         try
         {
-            try
+            var reader = new MultipartReader(boundary, Request.Body);
+            MultipartSection? section;
+            while ((section = await reader.ReadNextSectionAsync()) != null)
             {
-                await using var input = file.OpenReadStream();
-                await using var dec = System.IO.File.Create(tempZip);
-                await BackupCrypto.DecryptToStreamAsync(input, password, dec);
+                if (!ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var cd))
+                    continue;
+                var name   = HeaderUtilities.RemoveQuotes(cd.Name).Value;
+                var isFile = !string.IsNullOrEmpty(HeaderUtilities.RemoveQuotes(cd.FileName).Value)
+                          || !string.IsNullOrEmpty(HeaderUtilities.RemoveQuotes(cd.FileNameStar).Value);
+
+                if (isFile)
+                {
+                    if (string.IsNullOrEmpty(password))
+                    {
+                        logger.LogWarning("[import] file part arrived before the password field");
+                        return BadRequest("Password must be sent before the file.");
+                    }
+                    logger.LogInformation("[import] receiving file part, streaming decrypt to temp…");
+                    try
+                    {
+                        await using var dec = System.IO.File.Create(tempZip);
+                        await BackupCrypto.DecryptToStreamAsync(section.Body, password, dec);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning("[import] decrypt failed after {Ms} ms: {Error}", sw.ElapsedMilliseconds, ex.Message);
+                        return BadRequest("Wrong password or corrupted file.");
+                    }
+                    gotFile = true;
+                    logger.LogInformation("[import] decrypted to temp: {ZipMB:F1} MB in {Ms} ms",
+                        new FileInfo(tempZip).Length / 1024.0 / 1024.0, sw.ElapsedMilliseconds);
+                }
+                else
+                {
+                    using var sr = new StreamReader(section.Body, Encoding.UTF8);
+                    var val = (await sr.ReadToEndAsync()).Trim();
+                    if (name == "password") password = val;
+                    else if (name == "mode" && !string.IsNullOrWhiteSpace(val)) mode = val;
+                }
             }
-            catch (Exception ex)
-            {
-                logger.LogWarning("[import] decrypt failed after {Ms} ms: {Error}", sw.ElapsedMilliseconds, ex.Message);
-                return BadRequest("Wrong password or corrupted file.");
-            }
-            logger.LogInformation("[import] decrypted to temp: {ZipMB:F1} MB in {Ms} ms",
-                new FileInfo(tempZip).Length / 1024.0 / 1024.0, sw.ElapsedMilliseconds);
+
+            if (string.IsNullOrWhiteSpace(password)) return BadRequest("Password is required.");
+            if (!gotFile) return BadRequest("No file provided.");
 
             try
             {

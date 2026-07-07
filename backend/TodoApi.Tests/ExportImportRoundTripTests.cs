@@ -74,6 +74,25 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
     }
 
     [Fact]
+    public async Task Import_FileBeforePassword_ReturnsBadRequest()
+    {
+        var source = ClientFor("rt_ord_" + Guid.NewGuid());
+        var backup = await MakeBackupWithTodo(source, "ordered", "pw");
+
+        var target = ClientFor("rt_ord2_" + Guid.NewGuid());
+        // file FIRST, password AFTER: the streaming reader has no key when the file arrives.
+        var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(backup);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(file, "file", "todolist.backup");
+        form.Add(new StringContent("pw"), "password");
+        form.Add(new StringContent("replace"), "mode");
+
+        var resp = await target.PostAsync("/api/export/import", form);
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
     public async Task Import_WrongPassword_ReturnsBadRequest()
     {
         var source = ClientFor("rt_wp_" + Guid.NewGuid());
