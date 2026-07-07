@@ -27,6 +27,18 @@ input, textarea, select {
   background-color: #fff;
 }
 
+/* iOS Safari renders native checkboxes/radios as a black box in device dark mode — it does
+   NOT inherit :root color-scheme onto form controls. Pin the scheme (light = white box) and
+   the accent on the controls themselves so they look like they do on Windows/Chrome:
+   white box, indigo check. `appearance:auto` keeps native rendering (undoes any bg override). */
+input[type="checkbox"], input[type="radio"] {
+  color-scheme: light;
+  accent-color: #6366f1;
+  -webkit-appearance: auto;
+  appearance: auto;
+  background-color: transparent;
+}
+
 .app {
   margin: 48px 24px;
 }
