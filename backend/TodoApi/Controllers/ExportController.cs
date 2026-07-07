@@ -291,19 +291,24 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
                 DECLARE rec RECORD; maxid BIGINT;
                 BEGIN
                   FOR rec IN
+                    -- deptype 'a' = serial columns, 'i' = GENERATED AS IDENTITY (EF Core/Npgsql
+                    -- default); we must cover both or identity sequences are silently skipped.
                     SELECT s.relname AS seq, t.relname AS tbl, a.attname AS col
                     FROM pg_class s
-                    JOIN pg_depend d ON d.objid = s.oid AND d.deptype = 'a'
+                    JOIN pg_depend d ON d.objid = s.oid AND d.deptype IN ('a','i') AND d.refobjsubid > 0
                     JOIN pg_class t ON t.oid = d.refobjid
                     JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid
                     JOIN pg_namespace n ON n.oid = s.relnamespace
                     WHERE s.relkind = 'S' AND n.nspname = 'public'
                   LOOP
                     EXECUTE format('SELECT COALESCE(MAX(%I),0) FROM %I', rec.col, rec.tbl) INTO maxid;
+                    -- setval's first arg is regclass: pass the quoted identifier as a literal so
+                    -- mixed-case names (e.g. "CommentAttachments_Id_seq") resolve instead of being
+                    -- folded to lowercase (which would raise "relation does not exist").
                     IF maxid < 1 THEN
-                      EXECUTE format('SELECT setval(%L, 1, false)', rec.seq);
+                      EXECUTE format('SELECT setval(%L, 1, false)', quote_ident(rec.seq));
                     ELSE
-                      EXECUTE format('SELECT setval(%L, %s, true)', rec.seq, maxid);
+                      EXECUTE format('SELECT setval(%L, %s, true)', quote_ident(rec.seq), maxid);
                     END IF;
                   END LOOP;
                 END $$;
