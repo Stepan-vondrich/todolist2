@@ -962,6 +962,17 @@ h1 {
 .todo-header > span:nth-child(9) { width: 110px; flex-shrink: 0; }
 .todo-header > span:nth-child(10) { width: 90px; flex-shrink: 0; }
 
+/* iPad in landscape (retina touch tablets ~1001–1194px CSS, e.g. this 2160×1620@2x iPad =
+   1080px wide): the width is above the phone breakpoint so the full desktop layout shows,
+   but it reads a touch large on the tablet. Shrink the whole page 10% so it sits right.
+   `zoom` reflows the layout (unlike `transform: scale`, which would leave blank space) and
+   media queries key off the unzoomed layout width, so there's no feedback loop. `hover:none`
+   + retina scope this to touch tablets, leaving desktop browsers untouched. Tweak 0.9 to taste. */
+@media only screen and (min-width: 1001px) and (max-width: 1194px)
+  and (-webkit-min-device-pixel-ratio: 2) and (hover: none) {
+  :root { zoom: 0.9; }
+}
+
 /* Narrow screens (phones/tablets): the table has many fixed-width columns and
    would otherwise squeeze the flexible "Název" column down to nothing, hiding the
    text. Instead, anchor the table to a fixed minimum width and let it scroll
