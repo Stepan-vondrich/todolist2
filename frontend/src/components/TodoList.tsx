@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { TodoItem as Todo, FilterState } from '../types'
 import type { DropPosition } from '../api/todos'
 import TodoItem from './TodoItem'
+import { edgeScrollVelocity } from '../utils/dragScroll'
 
 // One indent level, in px. Must match the spacer width in TodoItem and the
 // `--row-indent` set on each row below, so the Název column math stays consistent.
@@ -109,23 +110,57 @@ export default function TodoList({ todos, onUpdate, onDelete, onAdd, onOpenComme
     setDraggingId(sourceId)
     let current: { id: number; position: DropPosition } | null = null
 
-    const onMove = (ev: PointerEvent) => {
-      ev.preventDefault() // stop the page from scrolling while dragging
-      const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null
+    // Anchor the drop hit-test to the X where the drag started, so sideways finger drift is
+    // ignored — the task reorders purely by vertical movement, as if riding a vertical rail.
+    const anchorX = e.clientX
+    let lastY = e.clientY
+    let rafId = 0
+
+    const evalDropAt = (y: number) => {
+      const el = document.elementFromPoint(anchorX, y) as HTMLElement | null
       const row = el?.closest('[data-todo-id]') as HTMLElement | null
       if (!row) { current = null; setDropTarget(null); return }
       const targetId = Number(row.getAttribute('data-todo-id'))
       if (!targetId || targetId === sourceId) { current = null; setDropTarget(null); return }
       const rect = row.getBoundingClientRect()
-      const y = ev.clientY - rect.top
-      const position: DropPosition = y < rect.height * 0.30 ? 'before' : y > rect.height * 0.70 ? 'after' : 'inside'
+      const ry = y - rect.top
+      const position: DropPosition = ry < rect.height * 0.30 ? 'before' : ry > rect.height * 0.70 ? 'after' : 'inside'
       current = { id: targetId, position }
       setDropTarget(prev => prev?.id === targetId && prev.position === position ? prev : { id: targetId, position })
     }
+
+    // While the finger sits near the top/bottom edge, scroll the page slowly (rAF loop) and
+    // keep re-testing the drop row as content slides under the (still) finger.
+    const autoScrollStep = () => {
+      const v = edgeScrollVelocity(lastY, window.innerHeight)
+      if (v !== 0) {
+        window.scrollBy(0, v)
+        evalDropAt(lastY)
+        rafId = requestAnimationFrame(autoScrollStep)
+      } else {
+        rafId = 0
+      }
+    }
+
+    const onMove = (ev: PointerEvent) => {
+      ev.preventDefault()
+      lastY = ev.clientY
+      evalDropAt(lastY)
+      if (!rafId && edgeScrollVelocity(lastY, window.innerHeight) !== 0) {
+        rafId = requestAnimationFrame(autoScrollStep)
+      }
+    }
+    // iOS Safari doesn't reliably stop scrolling from pointermove.preventDefault, so also
+    // block touchmove directly for the whole drag — this kills the sideways drift and the
+    // runaway native scroll; our own edge auto-scroll takes over instead.
+    const blockTouch = (ev: TouchEvent) => ev.preventDefault()
+
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
+      document.removeEventListener('touchmove', blockTouch)
+      if (rafId) cancelAnimationFrame(rafId)
       const drop = current
       setDraggingId(null)
       setDropTarget(null)
@@ -134,6 +169,7 @@ export default function TodoList({ todos, onUpdate, onDelete, onAdd, onOpenComme
     window.addEventListener('pointermove', onMove, { passive: false })
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
+    document.addEventListener('touchmove', blockTouch, { passive: false })
   }
 
   // Strip diacritics + lowercase for accent-insensitive matching ("krem" matches "krém")
