@@ -132,6 +132,31 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
     }
 
     [Fact]
+    public async Task Import_AddOnly_UpdatesRenamedAndReparentedExistingTodo()
+    {
+        // SOURCE: parent "P" (id 1) + child renamed "child NEW" placed under P (id 2).
+        var source = ClientFor("rt_upd_src_" + Guid.NewGuid());
+        await source.PostAsJsonAsync("/api/todos", new { Title = "P", IsCompleted = false });                    // id 1
+        await source.PostAsJsonAsync("/api/todos", new { Title = "child NEW", IsCompleted = false, ParentId = 1 }); // id 2 under P
+        var exportResp = await source.PostAsJsonAsync("/api/export/export", new { Password = "pw" });
+        var backup = await exportResp.Content.ReadAsByteArrayAsync();
+
+        // TARGET: same ids but the OLD state — child "child OLD" as a root, no parent.
+        var target = ClientFor("rt_upd_dst_" + Guid.NewGuid());
+        await target.PostAsJsonAsync("/api/todos", new { Title = "P", IsCompleted = false });                    // id 1
+        await target.PostAsJsonAsync("/api/todos", new { Title = "child OLD", IsCompleted = false });             // id 2, root
+
+        using var form = ImportForm(backup, "pw", "addonly");
+        var importResp = await target.PostAsync("/api/export/import", form);
+        Assert.True(importResp.StatusCode == HttpStatusCode.OK, await importResp.Content.ReadAsStringAsync());
+
+        var todos = await target.GetFromJsonAsync<List<TodoResponse>>("/api/todos");
+        var child = todos!.First(t => t.Id == 2);
+        Assert.Equal("child NEW", child.Title);   // rename propagated
+        Assert.Equal(1, child.ParentId);          // re-parenting propagated
+    }
+
+    [Fact]
     public async Task Import_WrongPassword_ReturnsBadRequest()
     {
         var source = ClientFor("rt_wp_" + Guid.NewGuid());
@@ -143,7 +168,7 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
         Assert.Equal(HttpStatusCode.BadRequest, importResp.StatusCode);
     }
 
-    private record TodoResponse(int Id, string Title, bool IsCompleted, string Status);
+    private record TodoResponse(int Id, string Title, bool IsCompleted, string Status, int? ParentId);
     private record CommentResponse(int Id, int TodoId, string Text, List<AttachmentResponse> Attachments);
     private record AttachmentResponse(int Id, string Path, string? FileName);
 }

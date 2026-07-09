@@ -199,6 +199,7 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
         var backupLogs     = data.Logs ?? [];
 
         int addedTodos, addedComments, addedSessions, addedOverlaps, addedLogs;
+        int updatedTodos = 0;
 
         if (mode == "merge" || mode == "addonly")
         {
@@ -236,6 +237,28 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
             var overlapsToAdd = backupOverlaps.Where(o => !currentOverlapIds.Contains(o.Id)).ToList();
 
             foreach (var t in todosToAdd)    db.Todos.Add(t);
+            await db.SaveChangesAsync();
+
+            // Update todos that already exist (matched by Id) to the backup's version, so a task
+            // that was renamed or moved under a different parent — but not deleted — syncs instead
+            // of being silently skipped. (addonly/merge previously only added brand-new ids.) Run
+            // after the adds so a re-parent onto a newly-added parent resolves.
+            var backupTodoById = data.Todos.ToDictionary(t => t.Id);
+            foreach (var existing in currentTodos)
+            {
+                if (!backupTodoById.TryGetValue(existing.Id, out var bt)) continue;
+                existing.Title         = bt.Title;
+                existing.ParentId      = bt.ParentId;
+                existing.Status        = bt.Status;
+                existing.Priority      = bt.Priority;
+                existing.Related       = bt.Related;
+                existing.DetailRelated = bt.DetailRelated;
+                existing.DueDate       = bt.DueDate;
+                existing.SortOrder     = bt.SortOrder;
+                existing.IsCompleted   = bt.IsCompleted;
+                existing.CreatedAt     = bt.CreatedAt;
+                updatedTodos++;
+            }
             await db.SaveChangesAsync();
 
             // After todos are in DB, add logs whose TodoId now exists
@@ -326,9 +349,9 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
             logger.LogInformation("[import] resynced Postgres identity sequences");
         }
 
-        logger.LogInformation("[import] done in {Ms} ms: +{Todos} todos, +{Comments} comments, +{Sessions} sessions, +{Overlaps} overlaps, +{Logs} logs (mode={Mode})",
-            sw.ElapsedMilliseconds, addedTodos, addedComments, addedSessions, addedOverlaps, addedLogs, mode);
-        return Ok(new { todos = addedTodos, comments = addedComments, sessions = addedSessions, overlaps = addedOverlaps, logs = addedLogs, mode });
+        logger.LogInformation("[import] done in {Ms} ms: +{Todos} todos (~{Updated} updated), +{Comments} comments, +{Sessions} sessions, +{Overlaps} overlaps, +{Logs} logs (mode={Mode})",
+            sw.ElapsedMilliseconds, addedTodos, updatedTodos, addedComments, addedSessions, addedOverlaps, addedLogs, mode);
+        return Ok(new { todos = addedTodos, updatedTodos, comments = addedComments, sessions = addedSessions, overlaps = addedOverlaps, logs = addedLogs, mode });
     }
 
     // ── Time tracking CSV export (no password) ───────────────────────────────
