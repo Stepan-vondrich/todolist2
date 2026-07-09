@@ -296,6 +296,40 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
     }
 
     [Fact]
+    public async Task Export_ThenImport_RestoresBookmarks()
+    {
+        var source = ClientFor("bm_src_" + Guid.NewGuid());
+        await source.PostAsJsonAsync("/api/bookmarks", new { Name = "Práce", Color = "#ff0000", NameFilter = "abc" });
+        var backup = await (await source.PostAsJsonAsync("/api/export/export", new { Password = "pw" }))
+            .Content.ReadAsByteArrayAsync();
+
+        var target = ClientFor("bm_dst_" + Guid.NewGuid());
+        using var form = ImportForm(backup, "pw"); // replace
+        Assert.Equal(HttpStatusCode.OK, (await target.PostAsync("/api/export/import", form)).StatusCode);
+
+        var bookmarks = await target.GetFromJsonAsync<List<BookmarkResponse>>("/api/bookmarks");
+        Assert.Contains(bookmarks!, b => b.Name == "Práce" && b.NameFilter == "abc");
+    }
+
+    [Fact]
+    public async Task Import_AddOnly_UpdatesExistingBookmark()
+    {
+        var source = ClientFor("bm2_src_" + Guid.NewGuid());
+        await source.PostAsJsonAsync("/api/bookmarks", new { Name = "NEW name", Color = "#00ff00", NameFilter = "x" }); // id 1
+        var backup = await (await source.PostAsJsonAsync("/api/export/export", new { Password = "pw" }))
+            .Content.ReadAsByteArrayAsync();
+
+        var target = ClientFor("bm2_dst_" + Guid.NewGuid());
+        await target.PostAsJsonAsync("/api/bookmarks", new { Name = "OLD name", Color = "#000000", NameFilter = "y" }); // id 1
+
+        using var form = ImportForm(backup, "pw", "addonly");
+        Assert.Equal(HttpStatusCode.OK, (await target.PostAsync("/api/export/import", form)).StatusCode);
+
+        var bookmarks = await target.GetFromJsonAsync<List<BookmarkResponse>>("/api/bookmarks");
+        Assert.Equal("NEW name", bookmarks!.Single(b => b.Id == 1).Name);
+    }
+
+    [Fact]
     public async Task Import_WrongPassword_ReturnsBadRequest()
     {
         var source = ClientFor("rt_wp_" + Guid.NewGuid());
@@ -310,4 +344,5 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
     private record TodoResponse(int Id, string Title, bool IsCompleted, string Status, int? ParentId);
     private record CommentResponse(int Id, int TodoId, string Text, List<AttachmentResponse> Attachments);
     private record AttachmentResponse(int Id, string Path, string? FileName);
+    private record BookmarkResponse(int Id, string Name, string Color, string NameFilter);
 }

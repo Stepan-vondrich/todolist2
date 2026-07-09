@@ -24,7 +24,8 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
         List<Comment> Comments,
         List<TaskSession>? Sessions = null,
         List<TaskOverlap>? Overlaps = null,
-        List<TaskLog>? Logs = null
+        List<TaskLog>? Logs = null,
+        List<FilterBookmark>? Bookmarks = null
     );
 
     static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -45,6 +46,7 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
         var sessions = await db.TaskSessions.OrderBy(s => s.StartedAt).ToListAsync();
         var overlaps = await db.TaskOverlaps.OrderBy(o => o.Id).ToListAsync();
         var logs     = await db.TaskLogs.OrderBy(l => l.Id).ToListAsync();
+        var bookmarks = await db.FilterBookmarks.OrderBy(b => b.Id).ToListAsync();
 
         // Build the zip on disk and encrypt it straight into the HTTP response — never hold the
         // whole (multi-hundred-MB) backup in memory. The old MemoryStream + Encrypt(ToArray())
@@ -58,7 +60,7 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
                 var jsonEntry = zip.CreateEntry("data.json", CompressionLevel.Fastest);
                 await using (var js = jsonEntry.Open())
                     await JsonSerializer.SerializeAsync(js,
-                        new ExportData(2, DateTime.UtcNow, todos, comments, sessions, overlaps, logs), JsonOpts);
+                        new ExportData(2, DateTime.UtcNow, todos, comments, sessions, overlaps, logs, bookmarks), JsonOpts);
 
                 if (req.IncludeFiles)
                 {
@@ -194,9 +196,10 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
         }
         finally { try { System.IO.File.Delete(tempZip); } catch { } }
 
-        var backupSessions = data.Sessions ?? [];
-        var backupOverlaps = data.Overlaps ?? [];
-        var backupLogs     = data.Logs ?? [];
+        var backupSessions   = data.Sessions ?? [];
+        var backupOverlaps   = data.Overlaps ?? [];
+        var backupLogs       = data.Logs ?? [];
+        var backupBookmarks  = data.Bookmarks ?? [];
 
         int addedTodos, addedComments, addedSessions, addedOverlaps, addedLogs;
         int updatedTodos = 0;
@@ -352,6 +355,20 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
             addedOverlaps = backupOverlaps.Count;
             addedLogs     = backupLogs.Count;
         }
+
+        // Restore filter bookmarks (standalone, no FKs, in every mode). replace/merge mirror the
+        // backup (drop bookmarks it doesn't have); addonly keeps local-only ones. Matched ids are
+        // updated, new ones added — same add/update/remove shape as todos.
+        var currentBookmarks = await db.FilterBookmarks.ToListAsync();
+        var backupBmById     = backupBookmarks.ToDictionary(b => b.Id);
+        var currentBmIds     = currentBookmarks.Select(b => b.Id).ToHashSet();
+        if (mode != "addonly")
+            db.FilterBookmarks.RemoveRange(currentBookmarks.Where(b => !backupBmById.ContainsKey(b.Id)));
+        foreach (var existing in currentBookmarks)
+            if (backupBmById.TryGetValue(existing.Id, out var bb)) CopyBookmark(bb, existing);
+        foreach (var b in backupBookmarks.Where(b => !currentBmIds.Contains(b.Id)))
+            db.FilterBookmarks.Add(b);
+        await db.SaveChangesAsync();
 
         // Rows were inserted with explicit PK values, which does NOT advance Postgres identity
         // sequences — so the next auto-generated Id collides with an already-imported row and
@@ -647,6 +664,21 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    static void CopyBookmark(FilterBookmark from, FilterBookmark to)
+    {
+        to.Name = from.Name;
+        to.Color = from.Color;
+        to.NameFilter = from.NameFilter;
+        to.ListFilter = from.ListFilter;
+        to.StatusFilter = from.StatusFilter;
+        to.PrioritaExcluded = from.PrioritaExcluded;
+        to.RelatedFilter = from.RelatedFilter;
+        to.DetailRelatedFilter = from.DetailRelatedFilter;
+        to.DateFrom = from.DateFrom;
+        to.DateTo = from.DateTo;
+        to.CollapsedIds = from.CollapsedIds;
+    }
 
     static List<string> ParseCsvRow(string line)
     {
