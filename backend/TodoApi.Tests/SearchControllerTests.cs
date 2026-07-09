@@ -219,4 +219,40 @@ public class SearchControllerTests : IClassFixture<WebApplicationFactory<Program
 
         Assert.Contains(1, ids);
     }
+
+    [Fact]
+    public async Task Search_FindsTitle_ByMultipleWordsInAnyOrder()
+    {
+        // "dovolena seznam" (reversed order, no diacritics) must find a title that contains
+        // both words somewhere, in any order.
+        var (client, db) = CreateClient();
+        await Seed(db, c => c.Todos.Add(new TodoItem { Id = 1, Title = "seznam na dovolenou, dovolena vzít sebou" }));
+
+        var ids = await SearchTodoIds(client, "dovolena seznam");
+
+        Assert.Contains(1, ids);
+    }
+
+    [Fact]
+    public async Task Search_TitleMultiWord_IsAccentInsensitive()
+    {
+        var (client, db) = CreateClient();
+        await Seed(db, c => c.Todos.Add(new TodoItem { Id = 1, Title = "seznam na dovolenou, dovolena vzít sebou" }));
+
+        var ids = await SearchTodoIds(client, "dovolená seznam");
+
+        Assert.Contains(1, ids);
+    }
+
+    [Fact]
+    public async Task Search_TitleMultiWord_RequiresAllWords_NotJustOne()
+    {
+        // AND semantics: one word present, the other absent → no match.
+        var (client, db) = CreateClient();
+        await Seed(db, c => c.Todos.Add(new TodoItem { Id = 1, Title = "seznam na dovolenou" }));
+
+        var ids = await SearchTodoIds(client, "seznam chybejici");
+
+        Assert.DoesNotContain(1, ids);
+    }
 }

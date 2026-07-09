@@ -42,7 +42,7 @@ public class SearchController(AppDbContext db) : ControllerBase
         {
             var matches = new List<object>();
 
-            if (ContainsNorm(todo.Title, norm))
+            if (ContainsAllWords(todo.Title, norm))
                 matches.Add(new { source = "title", text = todo.Title });
             if (ContainsNorm(todo.Related, norm))
                 matches.Add(new { source = "related", text = todo.Related });
@@ -111,6 +111,18 @@ public class SearchController(AppDbContext db) : ControllerBase
 
     static bool ContainsNorm(string? field, string normQuery) =>
         !string.IsNullOrEmpty(field) && Normalize(field).Contains(normQuery, StringComparison.Ordinal);
+
+    // Multi-word title match: every whitespace-separated word of the query must appear
+    // somewhere in the field, in any order (accent-insensitive). So "dovolena seznam" finds
+    // "seznam na dovolenou, dovolena vzít sebou". A single word behaves like ContainsNorm.
+    // (Only the title uses this; attachment/PDF matching is left untouched.)
+    static bool ContainsAllWords(string? field, string normQuery)
+    {
+        if (string.IsNullOrEmpty(field)) return false;
+        var normField = Normalize(field);
+        var words = normQuery.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return words.Length > 0 && words.All(w => normField.Contains(w, StringComparison.Ordinal));
+    }
 
     static string StripSpace(string s) =>
         new(s.Where(ch => !char.IsWhiteSpace(ch)).ToArray());
