@@ -143,6 +143,19 @@ export default function App() {
     localStorage.setItem('todo-collapsed', JSON.stringify([...collapsed]))
   }, [collapsed])
 
+  // Native "expand/collapse all" toggle: if anything is collapsed, first click expands
+  // everything; from the fully-expanded state the next click collapses every parent so only
+  // the top-level categories stay visible.
+  function toggleAllCollapsed() {
+    if (collapsed.size > 0) {
+      setCollapsed(new Set())
+    } else {
+      const parentIds = new Set<number>()
+      for (const t of todos) if (t.parentId != null) parentIds.add(t.parentId)
+      setCollapsed(parentIds)
+    }
+  }
+
   // --- scroll-to-top button (shows once you've scrolled down a bit) ---
   const [showScrollTop, setShowScrollTop] = useState(false)
   useEffect(() => {
@@ -883,6 +896,14 @@ export default function App() {
           )}
         </div>
         {/* Quick-access chips */}
+        {/* Native, non-deletable expand/collapse-all toggle */}
+        <button
+          className="bookmark-chip bookmark-chip-native"
+          onClick={toggleAllCollapsed}
+          title={collapsed.size > 0 ? 'Rozbalit vše' : 'Sbalit vše — nechat jen hlavní kategorie'}
+        >
+          {collapsed.size > 0 ? '⊞ vše otevřít' : '⊟ vše zavřít'}
+        </button>
         {bookmarks.map(b => (
           <button
             key={b.id}
