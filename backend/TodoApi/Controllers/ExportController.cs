@@ -389,6 +389,18 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
             logger.LogInformation("[import] resynced Postgres identity sequences");
         }
 
+        // Drop comments orphaned by a since-deleted todo (their TodoId no longer exists) — older
+        // deletions didn't cascade comments, so these could linger. Removing them frees their
+        // attachment rows, so the files fall out of the referenced set and get pruned below.
+        var liveTodoIds = (await db.Todos.Select(t => t.Id).ToListAsync()).ToHashSet();
+        var orphanComments = await db.Comments.Where(c => !liveTodoIds.Contains(c.TodoId)).ToListAsync();
+        if (orphanComments.Count > 0)
+        {
+            db.Comments.RemoveRange(orphanComments); // cascades to CommentAttachments
+            await db.SaveChangesAsync();
+            logger.LogInformation("[import] removed {N} comment(s) orphaned by deleted todos", orphanComments.Count);
+        }
+
         // Enforce "no orphaned files": every file in uploads must be referenced by an attachment
         // (its Path or Preview). Delete any upload file nothing points to after this import — e.g.
         // attachments dropped during a merge, or extracted files that ended up unreferenced.

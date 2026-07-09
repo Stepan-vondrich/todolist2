@@ -7,6 +7,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using TodoApi.Data;
+using TodoApi.Models;
 
 namespace TodoApi.Tests;
 
@@ -254,6 +255,44 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
         var after = await client.GetFromJsonAsync<List<CommentResponse>>($"/api/comments?todoId={s.Id}");
         Assert.Empty(after!);                                                // orphaned comment gone
         Assert.False(File.Exists(filePath));                                 // attachment file deleted
+    }
+
+    private static async Task Seed(string dbName, Action<AppDbContext> seed)
+    {
+        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(dbName).Options;
+        using var db = new AppDbContext(options);
+        seed(db);
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task Import_PrunesOrphanedComments_AndTheirFiles()
+    {
+        // A comment left behind by a since-deleted todo (TodoId points at nothing) + its file.
+        var dbName = "orphanc_" + Guid.NewGuid();
+        var target = ClientFor(dbName);
+        var fileName = Guid.NewGuid().ToString("N") + ".png";
+        var filePath = Path.Combine(TodoApi.DataPaths.Uploads, fileName);
+        Directory.CreateDirectory(TodoApi.DataPaths.Uploads);
+        File.WriteAllText(filePath, "orphan");
+        await Seed(dbName, db =>
+        {
+            db.Comments.Add(new Comment { Id = 1, TodoId = 99999, Text = "orphan" });
+            db.CommentAttachments.Add(new CommentAttachment { Id = 1, CommentId = 1, Path = "/uploads/" + fileName, Type = "image" });
+        });
+        Assert.True(File.Exists(filePath), "orphan file should exist before import");
+
+        // Any valid backup imported addonly triggers the cleanup.
+        var src = ClientFor("orphanc_src_" + Guid.NewGuid());
+        await src.PostAsJsonAsync("/api/todos", new { Title = "x", IsCompleted = false });
+        var backup = await (await src.PostAsJsonAsync("/api/export/export", new { Password = "pw" }))
+            .Content.ReadAsByteArrayAsync();
+
+        using var form = ImportForm(backup, "pw", "addonly");
+        Assert.Equal(HttpStatusCode.OK, (await target.PostAsync("/api/export/import", form)).StatusCode);
+
+        Assert.False(File.Exists(filePath), "orphaned comment's file should be pruned");
     }
 
     [Fact]
