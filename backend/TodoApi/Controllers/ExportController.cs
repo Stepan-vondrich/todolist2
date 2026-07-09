@@ -389,6 +389,27 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
             logger.LogInformation("[import] resynced Postgres identity sequences");
         }
 
+        // Enforce "no orphaned files": every file in uploads must be referenced by an attachment
+        // (its Path or Preview). Delete any upload file nothing points to after this import — e.g.
+        // attachments dropped during a merge, or extracted files that ended up unreferenced.
+        var referencedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var a in await db.CommentAttachments.AsNoTracking().ToListAsync())
+        {
+            if (!string.IsNullOrEmpty(a.Path))    referencedFiles.Add(Path.GetFileName(a.Path));
+            if (!string.IsNullOrEmpty(a.Preview)) referencedFiles.Add(Path.GetFileName(a.Preview));
+        }
+        var pruneDir = TodoApi.DataPaths.Uploads;
+        int prunedFiles = 0;
+        if (Directory.Exists(pruneDir))
+        {
+            foreach (var f in Directory.GetFiles(pruneDir))
+            {
+                if (referencedFiles.Contains(Path.GetFileName(f))) continue;
+                try { System.IO.File.Delete(f); prunedFiles++; } catch { }
+            }
+        }
+        if (prunedFiles > 0) logger.LogInformation("[import] pruned {Pruned} orphaned upload file(s)", prunedFiles);
+
         logger.LogInformation("[import] done in {Ms} ms: +{Todos} todos (~{Updated} updated), +{Comments} comments, +{Sessions} sessions, +{Overlaps} overlaps, +{Logs} logs (mode={Mode})",
             sw.ElapsedMilliseconds, addedTodos, updatedTodos, addedComments, addedSessions, addedOverlaps, addedLogs, mode);
         return Ok(new { todos = addedTodos, updatedTodos, comments = addedComments, sessions = addedSessions, overlaps = addedOverlaps, logs = addedLogs, mode });

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.IO;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -215,12 +216,19 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
         using (var cf = CommentForm(1, "same", withFile: true))
             await target.PostAsync("/api/comments", cf);
 
+        // capture the on-disk file so we can assert it gets pruned, not just its DB row
+        var before = await target.GetFromJsonAsync<List<CommentResponse>>("/api/comments?todoId=1");
+        var fileName = Path.GetFileName(before!.First(x => x.Id == 1).Attachments.Single().Path);
+        var filePath = Path.Combine(TodoApi.DataPaths.Uploads, fileName);
+        Assert.True(File.Exists(filePath), "attachment file should exist before import");
+
         using var form = ImportForm(backup, "pw", "addonly");
         Assert.Equal(HttpStatusCode.OK, (await target.PostAsync("/api/export/import", form)).StatusCode);
 
         var comments = await target.GetFromJsonAsync<List<CommentResponse>>("/api/comments?todoId=1");
         var c = comments!.First(x => x.Id == 1);
-        Assert.Empty(c.Attachments);   // attachment absent from backup → removed
+        Assert.Empty(c.Attachments);          // attachment absent from backup → DB row removed
+        Assert.False(File.Exists(filePath));  // …and the orphaned file is deleted from disk
     }
 
     [Fact]
