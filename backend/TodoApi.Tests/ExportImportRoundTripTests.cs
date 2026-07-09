@@ -232,6 +232,31 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
     }
 
     [Fact]
+    public async Task DeleteTodo_DeletesSubtreeComments_AndTheirAttachmentFiles()
+    {
+        var client = ClientFor("del_" + Guid.NewGuid());
+        var p = await (await client.PostAsJsonAsync("/api/todos", new { Title = "P", IsCompleted = false }))
+            .Content.ReadFromJsonAsync<TodoResponse>();
+        var s = await (await client.PostAsJsonAsync("/api/todos", new { Title = "S", IsCompleted = false, ParentId = p!.Id }))
+            .Content.ReadFromJsonAsync<TodoResponse>();
+        using (var cf = CommentForm(s!.Id, "note", withFile: true))
+            Assert.True((await client.PostAsync("/api/comments", cf)).IsSuccessStatusCode);
+
+        var comments = await client.GetFromJsonAsync<List<CommentResponse>>($"/api/comments?todoId={s.Id}");
+        var filePath = Path.Combine(TodoApi.DataPaths.Uploads, Path.GetFileName(comments!.Single().Attachments.Single().Path));
+        Assert.True(File.Exists(filePath), "attachment file should exist before delete");
+
+        // Delete the PARENT — the subtask, its comment, and the file must all go with it.
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/todos/{p.Id}")).StatusCode);
+
+        var todos = await client.GetFromJsonAsync<List<TodoResponse>>("/api/todos");
+        Assert.DoesNotContain(todos!, t => t.Id == p.Id || t.Id == s.Id);   // whole subtree gone
+        var after = await client.GetFromJsonAsync<List<CommentResponse>>($"/api/comments?todoId={s.Id}");
+        Assert.Empty(after!);                                                // orphaned comment gone
+        Assert.False(File.Exists(filePath));                                 // attachment file deleted
+    }
+
+    [Fact]
     public async Task Import_WrongPassword_ReturnsBadRequest()
     {
         var source = ClientFor("rt_wp_" + Guid.NewGuid());

@@ -269,9 +269,47 @@ public class TodosController(AppDbContext db) : ControllerBase
         if (item.ParentId.HasValue && await db.Todos.AnyAsync(t => t.Id == item.ParentId.Value))
             Log(item.ParentId.Value, "subtask_deleted", new { title = item.Title });
 
-        await db.SaveChangesAsync(); // save the log entry before cascade-delete removes item
+        await db.SaveChangesAsync(); // save the log entry before the deletes below
 
-        db.Todos.Remove(item);
+        // ParentId isn't a real FK, so subtasks don't cascade — gather the whole subtree
+        // (this task + all descendant subtasks) ourselves.
+        var links = await db.Todos.Select(t => new { t.Id, t.ParentId }).ToListAsync();
+        var childrenOf = links.Where(t => t.ParentId.HasValue)
+            .GroupBy(t => t.ParentId!.Value)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Id).ToList());
+        var subtree = new List<int>();
+        var stack = new Stack<int>();
+        stack.Push(id);
+        while (stack.Count > 0)
+        {
+            var cur = stack.Pop();
+            subtree.Add(cur);
+            if (childrenOf.TryGetValue(cur, out var kids))
+                foreach (var k in kids) stack.Push(k);
+        }
+
+        // Comment→Todo isn't a FK either, so comments don't cascade. Delete every comment under
+        // the subtree AND its attachment files (Path + Preview), so nothing is orphaned on disk.
+        var comments = await db.Comments.Include(c => c.Attachments)
+            .Where(c => subtree.Contains(c.TodoId)).ToListAsync();
+        var uploadsRoot = TodoApi.DataPaths.Uploads;
+        foreach (var att in comments.SelectMany(c => c.Attachments))
+            foreach (var path in new[] { att.Path, att.Preview })
+            {
+                if (string.IsNullOrEmpty(path)) continue;
+                try
+                {
+                    var fp = System.IO.Path.Combine(uploadsRoot, System.IO.Path.GetFileName(path));
+                    if (System.IO.File.Exists(fp)) System.IO.File.Delete(fp);
+                }
+                catch { /* ignore a locked/missing file */ }
+            }
+        db.Comments.RemoveRange(comments); // cascades to CommentAttachments (that IS a FK)
+        await db.SaveChangesAsync();
+
+        // Remove the whole subtree of todos. TaskSessions/TaskLogs/TaskManifests cascade (real FKs).
+        var todos = await db.Todos.Where(t => subtree.Contains(t.Id)).ToListAsync();
+        db.Todos.RemoveRange(todos);
         await db.SaveChangesAsync();
         return NoContent();
     }
