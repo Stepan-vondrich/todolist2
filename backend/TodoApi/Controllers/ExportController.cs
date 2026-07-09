@@ -271,6 +271,46 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
 
             foreach (var c in commentsToAdd) db.Comments.Add(c);
             await db.SaveChangesAsync();
+
+            // Merge comments that already exist (matched by Id): update the text and reconcile the
+            // attachment set — add ones the backup has, drop ones it no longer has, refresh matched
+            // fields — so edited text and added/removed attachments on still-existing comments sync
+            // (not just brand-new comments). Files themselves ride in via the extraction loop above.
+            var backupCommentById = data.Comments.ToDictionary(c => c.Id);
+            var existingComments  = await db.Comments.Include(c => c.Attachments)
+                .Where(c => currentCommentIds.Contains(c.Id)).ToListAsync();
+            foreach (var existing in existingComments)
+            {
+                if (!backupCommentById.TryGetValue(existing.Id, out var bc)) continue;
+                existing.Text      = bc.Text;
+                existing.TodoId    = bc.TodoId;
+                existing.CreatedAt = bc.CreatedAt;
+
+                var backupAtt = (bc.Attachments ?? new List<TodoApi.Models.CommentAttachment>()).ToDictionary(a => a.Id);
+                var currentAtt = existing.Attachments.ToDictionary(a => a.Id);
+                foreach (var a in existing.Attachments.Where(a => !backupAtt.ContainsKey(a.Id)).ToList())
+                    db.CommentAttachments.Remove(a);
+                foreach (var ba in backupAtt.Values)
+                {
+                    if (currentAtt.TryGetValue(ba.Id, out var ca))
+                    {
+                        ca.Path = ba.Path; ca.FileName = ba.FileName; ca.Type = ba.Type;
+                        ca.Preview = ba.Preview; ca.SortOrder = ba.SortOrder;
+                        ca.ExtractedText = ba.ExtractedText; ca.PageTexts = ba.PageTexts;
+                    }
+                    else
+                    {
+                        db.CommentAttachments.Add(new TodoApi.Models.CommentAttachment
+                        {
+                            Id = ba.Id, CommentId = existing.Id, Path = ba.Path, FileName = ba.FileName,
+                            Type = ba.Type, Preview = ba.Preview, SortOrder = ba.SortOrder,
+                            ExtractedText = ba.ExtractedText, PageTexts = ba.PageTexts,
+                        });
+                    }
+                }
+            }
+            await db.SaveChangesAsync();
+
             foreach (var s in sessionsToAdd) db.TaskSessions.Add(s);
             await db.SaveChangesAsync();
             foreach (var o in overlapsToAdd) db.TaskOverlaps.Add(o);

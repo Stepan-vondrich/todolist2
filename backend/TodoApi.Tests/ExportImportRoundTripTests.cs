@@ -156,6 +156,73 @@ public class ExportImportRoundTripTests : IClassFixture<WebApplicationFactory<Pr
         Assert.Equal(1, child.ParentId);          // re-parenting propagated
     }
 
+    static MultipartFormDataContent CommentForm(int todoId, string text, bool withFile)
+    {
+        var f = new MultipartFormDataContent
+        {
+            { new StringContent(todoId.ToString()), "todoId" },
+            { new StringContent(text), "text" },
+        };
+        if (withFile)
+        {
+            var fc = new ByteArrayContent(Encoding.UTF8.GetBytes("filebytes"));
+            fc.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+            f.Add(fc, "file_0", "pic.png");
+        }
+        return f;
+    }
+
+    [Fact]
+    public async Task Import_AddOnly_MergesExistingComment_TextAndAddedAttachment()
+    {
+        // SOURCE: todo 1, comment 1 = "NEW text" + one attachment.
+        var source = ClientFor("rt_cm1_src_" + Guid.NewGuid());
+        await source.PostAsJsonAsync("/api/todos", new { Title = "T", IsCompleted = false }); // id 1
+        using (var cf = CommentForm(1, "NEW text", withFile: true))
+            Assert.True((await source.PostAsync("/api/comments", cf)).IsSuccessStatusCode);
+        var backup = await (await source.PostAsJsonAsync("/api/export/export", new { Password = "pw" }))
+            .Content.ReadAsByteArrayAsync();
+
+        // TARGET: same ids but stale — comment 1 = "OLD text", no attachment.
+        var target = ClientFor("rt_cm1_dst_" + Guid.NewGuid());
+        await target.PostAsJsonAsync("/api/todos", new { Title = "T", IsCompleted = false }); // id 1
+        using (var cf = CommentForm(1, "OLD text", withFile: false))
+            await target.PostAsync("/api/comments", cf);                                       // comment 1, no attachment
+
+        using var form = ImportForm(backup, "pw", "addonly");
+        Assert.Equal(HttpStatusCode.OK, (await target.PostAsync("/api/export/import", form)).StatusCode);
+
+        var comments = await target.GetFromJsonAsync<List<CommentResponse>>("/api/comments?todoId=1");
+        var c = comments!.First(x => x.Id == 1);
+        Assert.Equal("NEW text", c.Text);   // text merged
+        Assert.Single(c.Attachments);        // attachment added to the existing comment
+    }
+
+    [Fact]
+    public async Task Import_AddOnly_RemovesAttachmentDroppedFromBackup()
+    {
+        // SOURCE: comment 1 with NO attachment.
+        var source = ClientFor("rt_cm2_src_" + Guid.NewGuid());
+        await source.PostAsJsonAsync("/api/todos", new { Title = "T", IsCompleted = false });
+        using (var cf = CommentForm(1, "same", withFile: false))
+            await source.PostAsync("/api/comments", cf);
+        var backup = await (await source.PostAsJsonAsync("/api/export/export", new { Password = "pw" }))
+            .Content.ReadAsByteArrayAsync();
+
+        // TARGET: comment 1 WITH an attachment the backup no longer has.
+        var target = ClientFor("rt_cm2_dst_" + Guid.NewGuid());
+        await target.PostAsJsonAsync("/api/todos", new { Title = "T", IsCompleted = false });
+        using (var cf = CommentForm(1, "same", withFile: true))
+            await target.PostAsync("/api/comments", cf);
+
+        using var form = ImportForm(backup, "pw", "addonly");
+        Assert.Equal(HttpStatusCode.OK, (await target.PostAsync("/api/export/import", form)).StatusCode);
+
+        var comments = await target.GetFromJsonAsync<List<CommentResponse>>("/api/comments?todoId=1");
+        var c = comments!.First(x => x.Id == 1);
+        Assert.Empty(c.Attachments);   // attachment absent from backup → removed
+    }
+
     [Fact]
     public async Task Import_WrongPassword_ReturnsBadRequest()
     {
