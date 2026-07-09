@@ -147,6 +147,7 @@ export default function App() {
   // everything; from the fully-expanded state the next click collapses every parent so only
   // the top-level categories stay visible.
   function toggleAllCollapsed() {
+    setFilters(DEFAULT_FILTERS) // operate on the whole tree — show ALL categories, not just filtered
     if (collapsed.size > 0) {
       setCollapsed(new Set())
     } else {
