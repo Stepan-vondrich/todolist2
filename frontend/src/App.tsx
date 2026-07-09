@@ -65,7 +65,7 @@ function parseBookmarkArrays(b: FilterBookmark) {
 
 // Plánovač ("GPS pro tasky") je skrytý, ale funkční: route /now a ManifestPanel
 // zůstávají v kódu a fungují. Přepni na true pro zobrazení tlačítek 🧭 Teď / 📄 Manifest.
-const SHOW_PLANNER = false
+const SHOW_PLANNER = true
 
 // Live usage vs the free-tier limits (from GET /api/usage) — how close this environment
 // is to where paid billing would start.
