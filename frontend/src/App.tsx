@@ -636,7 +636,7 @@ export default function App() {
                   {([
                     { value: 'replace', label: 'Nahradit vše' },
                     { value: 'merge',   label: 'Přidat nové + odebrat chybějící' },
-                    { value: 'addonly', label: 'Přidat nové + zachovat vše' },
+                    { value: 'addonly', label: 'Přidat nové + zachovat vše (v případě změn mergování existujících tasků)' },
                     { value: 'time',    label: 'Importovat časování (.zip)' },
                   ] as const).map(opt => (
                     <label key={opt.value} className="backup-merge-label">
