@@ -6,6 +6,35 @@ namespace TodoApi.Tests;
 public class BackupCryptoTests
 {
     [Fact]
+    public async Task EncryptToStream_RoundTripsWithDecryptToStream_LargePayload()
+    {
+        var plain = new byte[300 * 1024]; // spans many AES blocks
+        for (int i = 0; i < plain.Length; i++) plain[i] = (byte)(i * 17 + 3);
+
+        using var enc = new MemoryStream();
+        await BackupCrypto.EncryptToStreamAsync(new MemoryStream(plain), "pw", enc);
+        enc.Position = 0;
+        using var dec = new MemoryStream();
+        await BackupCrypto.DecryptToStreamAsync(enc, "pw", dec);
+
+        Assert.Equal(plain, dec.ToArray());
+    }
+
+    [Fact]
+    public async Task EncryptToStream_ProducesSameFormatAsEncrypt()
+    {
+        // Streaming encrypt must be readable by the same decrypt path (salt+iv+ciphertext).
+        var plain = Encoding.UTF8.GetBytes("compat check — žluťoučký kůň");
+        using var enc = new MemoryStream();
+        await BackupCrypto.EncryptToStreamAsync(new MemoryStream(plain), "k", enc);
+
+        using var dec = new MemoryStream();
+        enc.Position = 0;
+        await BackupCrypto.DecryptToStreamAsync(enc, "k", dec);
+        Assert.Equal(plain, dec.ToArray());
+    }
+
+    [Fact]
     public async Task DecryptToStream_RoundTripsEncrypt()
     {
         var plain = Encoding.UTF8.GetBytes("hello streaming backup — příliš žluťoučký kůň 12345");

@@ -46,33 +46,43 @@ public class ExportController(AppDbContext db, ILogger<ExportController> logger)
         var overlaps = await db.TaskOverlaps.OrderBy(o => o.Id).ToListAsync();
         var logs     = await db.TaskLogs.OrderBy(l => l.Id).ToListAsync();
 
-        using var zipMs = new MemoryStream();
-        using (var zip = new ZipArchive(zipMs, ZipArchiveMode.Create, leaveOpen: true))
+        // Build the zip on disk and encrypt it straight into the HTTP response — never hold the
+        // whole (multi-hundred-MB) backup in memory. The old MemoryStream + Encrypt(ToArray())
+        // path OOM'd the small container once attachments were large.
+        var tempZip = Path.Combine(Path.GetTempPath(), $"todoexport_{Guid.NewGuid():N}.zip");
+        try
         {
-            var json = JsonSerializer.Serialize(
-                new ExportData(2, DateTime.UtcNow, todos, comments, sessions, overlaps, logs), JsonOpts);
-            var jsonEntry = zip.CreateEntry("data.json", CompressionLevel.Fastest);
-            using (var jw = new StreamWriter(jsonEntry.Open()))
-                await jw.WriteAsync(json);
-
-            if (req.IncludeFiles)
+            await using (var zipFile = System.IO.File.Create(tempZip))
+            using (var zip = new ZipArchive(zipFile, ZipArchiveMode.Create))
             {
-                var uploadsDir = TodoApi.DataPaths.Uploads;
-                if (Directory.Exists(uploadsDir))
+                var jsonEntry = zip.CreateEntry("data.json", CompressionLevel.Fastest);
+                await using (var js = jsonEntry.Open())
+                    await JsonSerializer.SerializeAsync(js,
+                        new ExportData(2, DateTime.UtcNow, todos, comments, sessions, overlaps, logs), JsonOpts);
+
+                if (req.IncludeFiles)
                 {
-                    foreach (var filePath in Directory.GetFiles(uploadsDir))
+                    var uploadsDir = TodoApi.DataPaths.Uploads;
+                    if (Directory.Exists(uploadsDir))
                     {
-                        var entry = zip.CreateEntry($"files/{Path.GetFileName(filePath)}", CompressionLevel.Fastest);
-                        using var src = System.IO.File.OpenRead(filePath);
-                        using var dst = entry.Open();
-                        await src.CopyToAsync(dst);
+                        foreach (var filePath in Directory.GetFiles(uploadsDir))
+                        {
+                            var entry = zip.CreateEntry($"files/{Path.GetFileName(filePath)}", CompressionLevel.Fastest);
+                            await using var src = System.IO.File.OpenRead(filePath);
+                            await using var dst = entry.Open();
+                            await src.CopyToAsync(dst);
+                        }
                     }
                 }
             }
-        }
 
-        var encrypted = BackupCrypto.Encrypt(zipMs.ToArray(), req.Password);
-        return File(encrypted, "application/octet-stream", "todolist.backup");
+            Response.ContentType = "application/octet-stream";
+            Response.Headers.ContentDisposition = "attachment; filename=todolist.backup";
+            await using (var zipRead = System.IO.File.OpenRead(tempZip))
+                await BackupCrypto.EncryptToStreamAsync(zipRead, req.Password, Response.Body);
+            return new EmptyResult();
+        }
+        finally { try { System.IO.File.Delete(tempZip); } catch { } }
     }
 
     // ── Encrypted backup import ──────────────────────────────────────────────

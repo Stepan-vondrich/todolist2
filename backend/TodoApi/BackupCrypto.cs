@@ -22,6 +22,25 @@ public static class BackupCrypto
         return ms.ToArray();
     }
 
+    // Streaming encrypt: writes [salt][iv] then the ciphertext of `input` to `output`, without
+    // buffering the whole payload — so exporting a multi-hundred-MB backup streams disk→response
+    // in a few MB of RAM instead of building the entire encrypted blob in memory (which OOM'd
+    // the small container). Output is byte-compatible with Encrypt / DecryptToStreamAsync.
+    public static async Task EncryptToStreamAsync(Stream input, string password, Stream output)
+    {
+        var salt = RandomNumberGenerator.GetBytes(SaltLen);
+        var iv   = RandomNumberGenerator.GetBytes(IvLen);
+        var key  = Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(password), salt, Iterations, HashAlgorithmName.SHA256, 32);
+        using var aes = Aes.Create();
+        aes.Key = key; aes.IV = iv;
+        await output.WriteAsync(salt);
+        await output.WriteAsync(iv);
+        // leaveOpen: the caller owns `output` (e.g. the HTTP response body).
+        await using var cs = new CryptoStream(output, aes.CreateEncryptor(), CryptoStreamMode.Write, leaveOpen: true);
+        await input.CopyToAsync(cs);
+        await cs.FlushFinalBlockAsync();
+    }
+
     // Streaming decrypt: reads the salt+iv header from `input`, then decrypts the rest into
     // `output` without buffering the whole payload — so a multi-hundred-MB backup imports
     // in a few MB of RAM instead of holding several full copies in memory.
