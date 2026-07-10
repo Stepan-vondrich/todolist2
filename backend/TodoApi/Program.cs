@@ -94,6 +94,28 @@ using (var scope = app.Services.CreateScope())
     if (pending.Count > 0) db.SaveChanges();
 }
 
+// Optional mutual-TLS gate — when CLIENT_CERT_SHA256 is set, the caller must present the pinned
+// client certificate (forwarded by the Container Apps ingress in X-Forwarded-Client-Cert). No
+// matching cert => 403, regardless of password. Unset => not enforced (safe rollout toggle).
+var pinnedCert = Environment.GetEnvironmentVariable("CLIENT_CERT_SHA256");
+if (!string.IsNullOrEmpty(pinnedCert))
+{
+    var certLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ClientCert");
+    app.Use(async (ctx, next) =>
+    {
+        var xfcc = ctx.Request.Headers["X-Forwarded-Client-Cert"].ToString();
+        if (TodoApi.ClientCertGate.IsAuthorized(xfcc, pinnedCert))
+            await next();
+        else
+        {
+            certLog.LogWarning("[cert] rejected {Path} — no matching client cert. XFCC='{Xfcc}'",
+                ctx.Request.Path, xfcc.Length > 200 ? xfcc[..200] + "…" : xfcc);
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsync("Client certificate required.");
+        }
+    });
+}
+
 // Optional Basic Auth gate — protects the WHOLE app (static files, uploads, API) when
 // APP_AUTH_USER + APP_AUTH_PASS are set (the Azure containers). Unset (local exe) = open.
 var authUser = Environment.GetEnvironmentVariable("APP_AUTH_USER");
