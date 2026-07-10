@@ -134,6 +134,29 @@ if (!string.IsNullOrEmpty(authUser) && !string.IsNullOrEmpty(authPass))
     });
 }
 
+// Optional single-user gate for Azure Container Apps built-in auth (EasyAuth): when ALLOWED_EMAIL
+// is set, only that logged-in Google account may pass — everyone else gets 403, regardless of the
+// OAuth consent screen's publish/testing status. EasyAuth already authenticated the caller and
+// forwards their identity in X-MS-CLIENT-PRINCIPAL(-NAME); those headers can't be client-spoofed.
+var allowedEmail = Environment.GetEnvironmentVariable("ALLOWED_EMAIL");
+if (!string.IsNullOrEmpty(allowedEmail))
+{
+    var emailLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("EmailGate");
+    app.Use(async (ctx, next) =>
+    {
+        var name      = ctx.Request.Headers["X-MS-CLIENT-PRINCIPAL-NAME"].ToString();
+        var principal = ctx.Request.Headers["X-MS-CLIENT-PRINCIPAL"].ToString();
+        if (TodoApi.EmailGate.IsAuthorized(name, principal, allowedEmail))
+            await next();
+        else
+        {
+            emailLog.LogWarning("[email] rejected {Path} — principal-name='{Name}' not the allowed account", ctx.Request.Path, name);
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsync("Access restricted to the owner's account.");
+        }
+    });
+}
+
 app.UseCors();
 
 app.UseDefaultFiles();
