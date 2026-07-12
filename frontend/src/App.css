@@ -1726,7 +1726,9 @@ h1 {
 
 .comments-list {
   flex: 1;
+  min-height: 0;                 /* let this flex child shrink so it scrolls itself, not the page */
   overflow-y: auto;
+  overscroll-behavior: contain;  /* wheel over comments stays in the panel — no chaining to the task list */
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
