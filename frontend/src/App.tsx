@@ -5,6 +5,7 @@ import { fetchTodos, createTodo, updateTodo, deleteTodo, moveTodo, reorderTodo, 
 import { fetchComments, fetchCommentCounts, createComment, deleteComment, updateComment } from './api/comments'
 import { fetchActiveTodoIds, startSession, endSession } from './api/taskSessions'
 import { ancestorIds } from './utils/ancestorIds'
+import { serializeFilters, deserializeFilters } from './utils/filterStorage'
 import AddTodoForm from './components/AddTodoForm'
 import TodoList from './components/TodoList'
 import CommentsPanel from './components/CommentsPanel'
@@ -79,7 +80,18 @@ interface UsageInfo {
 export default function App() {
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [openCommentsTodoId, setOpenCommentsTodoId] = useState<number | null>(null)
+  // Persisted so an open comments panel survives an F5 reload. Restored id is
+  // reconciled against the loaded todos below (cleared if that todo is gone).
+  const [openCommentsTodoId, setOpenCommentsTodoId] = useState<number | null>(() => {
+    try {
+      const saved = localStorage.getItem('todo-open-comments')
+      return saved ? Number(saved) : null
+    } catch { return null }
+  })
+  useEffect(() => {
+    if (openCommentsTodoId === null) localStorage.removeItem('todo-open-comments')
+    else localStorage.setItem('todo-open-comments', String(openCommentsTodoId))
+  }, [openCommentsTodoId])
   // When a search hit inside an attachment is clicked, this asks CommentsPanel to
   // open that file's viewer and jump to where `query` matches. Cleared once consumed.
   const [docJump, setDocJump] = useState<{ path: string; query: string; page?: number } | null>(null)
@@ -94,7 +106,12 @@ export default function App() {
   const [sessionEndComment, setSessionEndComment] = useState('')
 
   // --- filter state (lifted so bookmark button in header can access it) ---
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
+  // Persisted to localStorage so the filter/search row survives an F5 reload.
+  const [filters, setFilters] = useState<FilterState>(() =>
+    deserializeFilters(localStorage.getItem('todo-filters'), DEFAULT_FILTERS))
+  useEffect(() => {
+    try { localStorage.setItem('todo-filters', serializeFilters(filters)) } catch { /* quota — ignore */ }
+  }, [filters])
   function updateFilters(patch: Partial<FilterState>) {
     setFilters(prev => ({ ...prev, ...patch }))
   }
@@ -289,7 +306,22 @@ export default function App() {
 
   useEffect(() => {
     fetchTodos()
-      .then(setTodos)
+      .then(loaded => {
+        setTodos(loaded)
+        // A comments panel restored from localStorage (F5): if its todo still
+        // exists, load that todo's comments so the panel isn't empty; if the todo
+        // is gone, close the panel instead of showing an empty shifted layout.
+        const restored = openCommentsTodoId
+        if (restored !== null) {
+          if (loaded.some(t => t.id === restored)) {
+            fetchComments(restored)
+              .then(comments => setCommentsByTodo(prev => ({ ...prev, [restored]: comments })))
+              .catch(() => setCommentsByTodo(prev => ({ ...prev, [restored]: [] })))
+          } else {
+            setOpenCommentsTodoId(null)
+          }
+        }
+      })
       .catch(() => setError('Could not connect to the server.'))
     fetchCommentCounts()
       .then(setCommentCounts)
